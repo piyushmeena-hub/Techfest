@@ -1,0 +1,1567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAV-X Ground Control Station</title>
+  <script src="/static/js/three.min.js"></script>
+  <script src="/static/js/OrbitControls.js"></script>
+  <style>
+    /* ═══════════════════════════════════════════════════════
+       RESET & BASE
+    ═══════════════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #0a0e1a;
+      --panel:      #0d1224;
+      --panel2:     #111830;
+      --border:     #1e2d50;
+      --accent:     #00d4ff;
+      --green:      #00ff88;
+      --red:        #ff4444;
+      --orange:     #ff8c00;
+      --yellow:     #ffd700;
+      --blue:       #4488ff;
+      --gray:       #8899aa;
+      --text:       #c8d8f0;
+      --text-dim:   #5a7090;
+      --font:       'Courier New', Courier, monospace;
+    }
+
+    .view-switch-btns {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .btn-tab {
+      background: rgba(14, 24, 48, 0.8);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      font-family: var(--font);
+      font-size: 10px;
+      letter-spacing: 1px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+    }
+    .btn-tab:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .btn-tab.active {
+      background: rgba(0, 212, 255, 0.15);
+      color: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+      font-weight: bold;
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       LAYOUT
+    ═══════════════════════════════════════════════════════ */
+    .root {
+      display: grid;
+      grid-template-rows: 52px 1fr 56px;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+
+    .body-grid {
+      display: grid;
+      grid-template-columns: 280px 1fr 300px;
+      overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       HEADER
+    ═══════════════════════════════════════════════════════ */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      user-select: none;
+    }
+
+    .hdr-title {
+      font-size: 15px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      color: var(--accent);
+      text-shadow: 0 0 12px var(--accent);
+    }
+
+    .hdr-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--green);
+      letter-spacing: 2px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: blink 1.4s step-start infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.15; }
+    }
+
+    .hdr-right {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+    }
+
+    .hdr-time { color: var(--accent); font-size: 12px; }
+    .hdr-tick { color: var(--text); }
+    .hdr-tick span { color: var(--orange); font-weight: bold; }
+
+    /* ═══════════════════════════════════════════════════════
+       PANELS
+    ═══════════════════════════════════════════════════════ */
+    .panel {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel:last-child { border-right: none; border-left: 1px solid var(--border); }
+
+    .panel-title {
+      padding: 10px 14px 8px;
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       CENTER MAP PANEL
+    ═══════════════════════════════════════════════════════ */
+    .center-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 12px;
+      gap: 10px;
+    }
+
+    .center-title {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: var(--accent);
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    .map-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    #mission-map {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #060810;
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-shrink: 0;
+      justify-content: center;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       BUTTONS
+    ═══════════════════════════════════════════════════════ */
+    .btn {
+      padding: 8px 22px;
+      font-family: var(--font);
+      font-size: 12px;
+      letter-spacing: 2px;
+      border-radius: 3px;
+      cursor: pointer;
+      border: 1px solid;
+      transition: box-shadow 0.2s, transform 0.1s;
+      text-transform: uppercase;
+    }
+
+    .btn:active { transform: scale(0.97); }
+
+    .btn-start {
+      background: rgba(0, 212, 255, 0.08);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .btn-start:hover { box-shadow: 0 0 14px var(--accent); }
+
+    .btn-reset {
+      background: rgba(255, 140, 0, 0.08);
+      color: var(--orange);
+      border-color: var(--orange);
+    }
+    .btn-reset:hover { box-shadow: 0 0 14px var(--orange); }
+
+    /* ═══════════════════════════════════════════════════════
+       FLEET TABLE (LEFT)
+    ═══════════════════════════════════════════════════════ */
+    .fleet-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .fleet-scroll::-webkit-scrollbar { width: 4px; }
+    .fleet-scroll::-webkit-scrollbar-track { background: transparent; }
+    .fleet-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    table.fleet {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+
+    table.fleet thead th {
+      padding: 4px 8px;
+      text-align: left;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      font-size: 9px;
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+    }
+
+    table.fleet tbody tr {
+      border-bottom: 1px solid rgba(30, 45, 80, 0.5);
+      transition: background 0.15s;
+    }
+
+    table.fleet tbody tr:hover { background: rgba(0, 212, 255, 0.04); }
+
+    table.fleet tbody td {
+      padding: 5px 8px;
+      vertical-align: middle;
+    }
+
+    .uav-id   { color: var(--text); font-weight: bold; }
+    .role-scout  { color: var(--accent); }
+    .role-relay  { color: var(--blue); }
+    .role-idle   { color: var(--gray); }
+    .role-rtl    { color: var(--orange); }
+    .role-failed { color: var(--red); }
+
+    .bat-bar-wrap {
+      width: 62px;
+      height: 8px;
+      background: var(--panel2);
+      border-radius: 2px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .bat-bar {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.4s;
+    }
+    .bat-green  { background: var(--green); }
+    .bat-orange { background: var(--orange); }
+    .bat-red    { background: var(--red); }
+
+    .bat-label {
+      font-size: 9px;
+      color: var(--text-dim);
+      margin-left: 4px;
+    }
+
+    .status-badge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 2px;
+      letter-spacing: 0.5px;
+    }
+    .sb-active  { background: rgba(0,255,136,0.12); color: var(--green); }
+    .sb-landed  { background: rgba(136,153,170,0.12); color: var(--gray); }
+    .sb-failed  { background: rgba(255,68,68,0.12); color: var(--red); }
+    .sb-lowbat  { background: rgba(255,140,0,0.12); color: var(--orange); }
+
+    /* ═══════════════════════════════════════════════════════
+       EVENT LOG (RIGHT)
+    ═══════════════════════════════════════════════════════ */
+    .event-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+
+    .event-scroll::-webkit-scrollbar { width: 4px; }
+    .event-scroll::-webkit-scrollbar-track { background: transparent; }
+    .event-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .event-item {
+      padding: 5px 12px;
+      border-bottom: 1px solid rgba(30, 45, 80, 0.3);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .event-tick {
+      color: var(--text-dim);
+      font-size: 9px;
+      margin-right: 4px;
+    }
+
+    .event-type {
+      font-weight: bold;
+      margin-right: 4px;
+      font-size: 9px;
+      letter-spacing: 0.8px;
+    }
+
+    .ev-FAULT         { color: var(--red); }
+    .ev-FAULT_INJECTED{ color: var(--red); }
+    .ev-RTL           { color: var(--orange); }
+    .ev-SURVEY_COMPLETE { color: var(--green); }
+    .ev-RELAY_ASSIGN  { color: var(--accent); }
+    .ev-SCOUT_ASSIGN  { color: #88bbff; }
+    .ev-DELIVERED     { color: var(--blue); }
+    .ev-LANDED        { color: var(--green); }
+    .ev-DATA_ENQUEUE  { color: #aaddff; }
+    .ev-DELIVERY_FAIL { color: var(--red); }
+    .ev-DEFAULT       { color: var(--gray); }
+
+    .event-msg { color: var(--text); }
+
+    /* ═══════════════════════════════════════════════════════
+       STATUS BAR (BOTTOM)
+    ═══════════════════════════════════════════════════════ */
+    .status-bar {
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 0;
+      overflow: hidden;
+    }
+
+    .stat-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      border-right: 1px solid var(--border);
+      padding: 0 8px;
+    }
+    .stat-card:last-child { border-right: none; }
+
+    .stat-label {
+      font-size: 8px;
+      letter-spacing: 1.5px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    .sv-surveyed  { color: var(--green); }
+    .sv-packets   { color: var(--blue); }
+    .sv-active    { color: var(--accent); }
+    .sv-coverage  { color: var(--orange); }
+    .sv-survivors { color: var(--red); }
+
+    /* ═══════════════════════════════════════════════════════
+       UAV PULSE ANIMATION
+    ═══════════════════════════════════════════════════════ */
+    @keyframes pulse {
+      0%   { opacity: 1; r: 5; }
+      50%  { opacity: 0.5; r: 7; }
+      100% { opacity: 1; r: 5; }
+    }
+    .uav-pulse { animation: pulse 1.2s ease-in-out infinite; }
+
+    /* ═══════════════════════════════════════════════════════
+       MISSION COMPLETE OVERLAY
+    ═══════════════════════════════════════════════════════ */
+    #complete-banner {
+      display: none;
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 255, 136, 0.12);
+      border: 1px solid var(--green);
+      color: var(--green);
+      padding: 10px 28px;
+      font-size: 13px;
+      letter-spacing: 3px;
+      border-radius: 4px;
+      z-index: 100;
+      text-transform: uppercase;
+      box-shadow: 0 0 24px rgba(0, 255, 136, 0.3);
+    }
+  </style>
+</head>
+<body>
+
+<div id="complete-banner">✓ MISSION COMPLETE</div>
+
+<div class="root">
+
+  <!-- ─────────────── HEADER ─────────────── -->
+  <header>
+    <div class="hdr-title">UAV-X GROUND CONTROL STATION</div>
+
+    <div class="hdr-status">
+      <div class="dot"></div>
+      OPERATIONAL
+    </div>
+
+    <div class="hdr-right">
+      <span class="hdr-time" id="hdr-clock">--:--:--</span>
+      <span class="hdr-tick">TICK&nbsp;<span id="hdr-tick-val">0</span></span>
+    </div>
+  </header>
+
+  <!-- ─────────────── BODY ─────────────── -->
+  <div class="body-grid">
+
+    <!-- LEFT — Fleet Status -->
+    <div class="panel">
+      <div class="panel-title">Fleet Status</div>
+      <div class="fleet-scroll">
+        <table class="fleet">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Role</th>
+              <th>Battery</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="fleet-tbody">
+            <tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:16px 0;">No data — start mission</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CENTER — Mission Battlespace -->
+    <div class="center-panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <div class="center-title">Mission Battlespace</div>
+        <div class="view-switch-btns">
+          <button id="btn-view-2d" class="btn-tab active" onclick="switchView('2d')">2D TACTICAL</button>
+          <button id="btn-view-3d" class="btn-tab" onclick="switchView('3d')">3D BATTLESPACE (Three.js)</button>
+        </div>
+      </div>
+
+      <div class="map-wrapper">
+        <svg id="mission-map" viewBox="0 0 700 450" width="700" height="450">
+
+          <!-- Dark background -->
+          <rect x="0" y="0" width="700" height="450" fill="#060810" />
+
+          <!-- Grid lines -->
+          <g id="grid-lines" stroke="#0e1830" stroke-width="0.5">
+            <!-- vertical -->
+            <line x1="100" y1="0" x2="100" y2="450"/>
+            <line x1="200" y1="0" x2="200" y2="450"/>
+            <line x1="300" y1="0" x2="300" y2="450"/>
+            <line x1="400" y1="0" x2="400" y2="450"/>
+            <line x1="500" y1="0" x2="500" y2="450"/>
+            <line x1="600" y1="0" x2="600" y2="450"/>
+            <!-- horizontal -->
+            <line x1="0" y1="75"  x2="700" y2="75"/>
+            <line x1="0" y1="150" x2="700" y2="150"/>
+            <line x1="0" y1="225" x2="700" y2="225"/>
+            <line x1="0" y1="300" x2="700" y2="300"/>
+            <line x1="0" y1="375" x2="700" y2="375"/>
+          </g>
+
+          <!-- Relay chain (drawn behind UAVs) -->
+          <g id="relay-chain"></g>
+
+          <!-- PoI layer -->
+          <g id="poi-layer"></g>
+
+          <!-- UAV layer -->
+          <g id="uav-layer"></g>
+
+          <!-- GCS (triangle at bottom-left) -->
+          <g transform="translate(28,422)">
+            <polygon points="0,-12 10,6 -10,6" fill="#00d4ff" opacity="0.9"/>
+            <text x="0" y="16" text-anchor="middle" font-family="Courier New" font-size="8" fill="#00d4ff">GCS</text>
+          </g>
+
+          <!-- Coordinate compass label -->
+          <text x="696" y="12" text-anchor="end" font-family="Courier New" font-size="8" fill="#1e3060">2200m →</text>
+          <text x="8" y="12" text-anchor="start" font-family="Courier New" font-size="8" fill="#1e3060">↑ 1400m</text>
+
+          <!-- Legend -->
+          <g transform="translate(8, 40)">
+            <rect x="0" y="0" width="120" height="100" rx="2" fill="rgba(6,8,16,0.85)" stroke="#1e2d50" stroke-width="0.5"/>
+            <!-- Scout -->
+            <polygon points="6,8 2,14 10,14" fill="#00d4ff" transform="translate(0,-2)"/>
+            <text x="14" y="11" font-family="Courier New" font-size="8" fill="#8899aa">SCOUT</text>
+            <!-- Relay -->
+            <polygon points="6,22 2,28 10,28" fill="#4488ff" transform="translate(0,-2)"/>
+            <text x="14" y="25" font-family="Courier New" font-size="8" fill="#8899aa">RELAY</text>
+            <!-- RTL -->
+            <polygon points="6,36 2,42 10,42" fill="#ff8c00" transform="translate(0,-2)"/>
+            <text x="14" y="39" font-family="Courier New" font-size="8" fill="#8899aa">RTL</text>
+            <!-- IDLE -->
+            <polygon points="6,50 2,56 10,56" fill="#8899aa" transform="translate(0,-2)"/>
+            <text x="14" y="53" font-family="Courier New" font-size="8" fill="#8899aa">IDLE</text>
+            <!-- CRITICAL PoI -->
+            <circle cx="6" cy="65" r="5" fill="none" stroke="#ff4444" stroke-width="1.5"/>
+            <text x="14" y="68" font-family="Courier New" font-size="8" fill="#8899aa">CRITICAL</text>
+            <!-- HIGH PoI -->
+            <circle cx="6" cy="79" r="5" fill="none" stroke="#ff8c00" stroke-width="1.5"/>
+            <text x="14" y="82" font-family="Courier New" font-size="8" fill="#8899aa">HIGH</text>
+            <!-- LOW PoI -->
+            <circle cx="6" cy="93" r="5" fill="none" stroke="#00ff88" stroke-width="1.5"/>
+            <text x="14" y="96" font-family="Courier New" font-size="8" fill="#8899aa">LOW</text>
+          </g>
+
+        </svg>
+
+        <!-- 3D Battlespace Viewport (Three.js) -->
+        <div id="threejs-container" style="display:none; width:700px; height:450px; border-radius:4px; overflow:hidden; border:1px solid var(--border); position:relative; background:#060810;">
+          <div id="threejs-canvas-holder" style="width:100%; height:100%;"></div>
+          <div id="cam-hud" style="position:absolute; bottom:8px; left:10px; font-size:10px; color:var(--accent); background:rgba(6,8,16,0.85); padding:4px 10px; border-radius:3px; border:1px solid #1e2d50; letter-spacing:1px; pointer-events:none;">
+            3D BATTLESPACE: ORBIT [LEFT-CLICK: ROTATE | RIGHT-CLICK: PAN | SCROLL: ZOOM]
+          </div>
+          <div style="position:absolute; top:8px; right:10px; display:flex; gap:6px;">
+            <button class="btn-tab" style="font-size:9px; padding:3px 8px;" onclick="resetCameraView('iso')">ISOMETRIC</button>
+            <button class="btn-tab" style="font-size:9px; padding:3px 8px;" onclick="resetCameraView('top')">TOP-DOWN</button>
+            <button class="btn-tab" style="font-size:9px; padding:3px 8px;" onclick="resetCameraView('front')">FRONTLINE</button>
+            <button class="btn-tab" style="font-size:9px; padding:3px 8px;" id="btn-chase-cam" onclick="toggleChaseCam()">CHASE CAM</button>
+            <button class="btn-tab" style="font-size:9px; padding:3px 8px;" id="btn-pip-cam" onclick="toggleThermalPiP()">THERMAL PiP</button>
+          </div>
+
+          <!-- Picture-in-Picture Thermal IR Survivor Monitor -->
+          <div id="thermal-pip" style="position:absolute; bottom:12px; right:12px; width:220px; height:150px; background:rgba(6,10,20,0.95); border:1px solid #ff4444; border-radius:4px; overflow:hidden; box-shadow:0 0 16px rgba(255,68,68,0.3); display:flex; flex-direction:column; z-index:20;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#180a14; padding:3px 8px; border-bottom:1px solid #331525; font-size:9px;">
+              <span style="color:#ff5555; font-weight:bold; letter-spacing:1px; display:flex; align-items:center; gap:5px;">
+                <span style="width:6px; height:6px; border-radius:50%; background:#ff2222; display:inline-block; animation:blink 1s infinite;"></span>
+                THERMAL IR [LWIR]
+              </span>
+              <span id="pip-uav-id" style="color:#00d4ff; font-weight:bold;">UAV-06</span>
+            </div>
+            <div style="flex:1; position:relative; overflow:hidden;">
+              <canvas id="thermal-canvas" width="220" height="110" style="width:100%; height:100%; display:block;"></canvas>
+              <div id="thermal-osd" style="position:absolute; top:4px; left:6px; font-size:8px; color:#ffddaa; font-family:Courier New, monospace; line-height:1.2; text-shadow:1px 1px 2px #000; pointer-events:none;">
+                FOV: 42° | AGC: AUTO<br>
+                SENSOR: 640x512 VOX<br>
+                TEMP: <span id="osd-temp" style="color:#00ff88;">36.8°C</span>
+              </div>
+              <div id="thermal-bbox" style="position:absolute; top:35px; left:75px; width:65px; height:45px; border:1px solid #00ff88; box-shadow:0 0 6px #00ff88; font-size:7px; color:#00ff88; padding:2px; font-weight:bold; display:none;">
+                HUMAN [96%]
+              </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; background:#0c1220; padding:2px 8px; font-size:8px; color:#88aacc; border-top:1px solid #1e2d50;">
+              <span id="pip-status">TARGET: POI-A</span>
+              <span id="pip-gps">47.3982° N, 8.5461° E</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn btn-start" onclick="startMission()">▶ START MISSION</button>
+        <button class="btn btn-reset" onclick="resetMission()">↺ RESET</button>
+      </div>
+    </div>
+
+    <!-- RIGHT — Event Log -->
+    <div class="panel" style="border-left:1px solid var(--border);border-right:none;">
+      <div class="panel-title">Event Log</div>
+      <div class="event-scroll" id="event-scroll">
+        <div class="event-item" style="color:var(--text-dim);text-align:center;padding-top:20px;">Waiting for events…</div>
+      </div>
+    </div>
+
+  </div><!-- /body-grid -->
+
+  <!-- ─────────────── STATUS BAR ─────────────── -->
+  <div class="status-bar">
+    <div class="stat-card">
+      <div class="stat-label">PoIs Surveyed</div>
+      <div class="stat-value sv-surveyed" id="stat-surveyed">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Packets Delivered</div>
+      <div class="stat-value sv-packets" id="stat-packets">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">UAVs Active</div>
+      <div class="stat-value sv-active" id="stat-active">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Network Coverage</div>
+      <div class="stat-value sv-coverage" id="stat-coverage">0%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Survivors Found</div>
+      <div class="stat-value sv-survivors" id="stat-survivors">0</div>
+    </div>
+  </div>
+
+</div><!-- /root -->
+
+<script>
+  /* ==========================================================
+     COORDINATE TRANSFORM
+     World: x ∈ [0, 2200], y ∈ [0, 1400]
+     SVG:   x ∈ [30, 680], y ∈ [420, 20]  (y flipped)
+  ========================================================== */
+  const SVG_W  = 700;
+  const SVG_H  = 450;
+  const MAP_X0 = 28, MAP_X1 = 680;  // SVG left/right margins
+  const MAP_Y0 = 20, MAP_Y1 = 428;  // SVG top/bottom margins (top = world-max-y)
+  const WORLD_W = 2200;
+  const WORLD_H = 1400;
+
+  function toSVG(wx, wy) {
+    const sx = MAP_X0 + (wx / WORLD_W) * (MAP_X1 - MAP_X0);
+    const sy = MAP_Y1 - (wy / WORLD_H) * (MAP_Y1 - MAP_Y0);  // y inverted
+    return [sx, sy];
+  }
+
+  /* ==========================================================
+     COLOUR HELPERS
+  ========================================================== */
+  function roleColor(role) {
+    switch (role) {
+      case 'Scout': return '#00d4ff';
+      case 'Relay': return '#4488ff';
+      case 'RTL':   return '#ff8c00';
+      case 'Idle':  return '#8899aa';
+      default:      return '#ffffff';
+    }
+  }
+
+  function poiColor(priority) {
+    switch (priority) {
+      case 'CRITICAL': return '#ff4444';
+      case 'HIGH':     return '#ff8c00';
+      case 'MEDIUM':   return '#ffd700';
+      case 'LOW':      return '#00ff88';
+      default:         return '#8899aa';
+    }
+  }
+
+  function eventClass(type) {
+    const known = [
+      'FAULT', 'FAULT_INJECTED', 'RTL', 'SURVEY_COMPLETE',
+      'RELAY_ASSIGN', 'SCOUT_ASSIGN', 'DELIVERED', 'LANDED',
+      'DATA_ENQUEUE', 'DELIVERY_FAIL'
+    ];
+    return known.includes(type) ? 'ev-' + type : 'ev-DEFAULT';
+  }
+
+  /* ==========================================================
+     SVG HELPERS
+  ========================================================== */
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+
+  // Draw a filled triangle (UAV icon) pointing up, centred at (cx, cy)
+  function uavTriangle(cx, cy, size, color, failed) {
+    const g = svgEl('g', { transform: `translate(${cx},${cy})` });
+    if (failed) {
+      // X cross for failed UAVs
+      const x1 = svgEl('line', { x1: -5, y1: -5, x2: 5, y2: 5, stroke: '#ff4444', 'stroke-width': 2 });
+      const x2 = svgEl('line', { x1: 5, y1: -5, x2: -5, y2: 5, stroke: '#ff4444', 'stroke-width': 2 });
+      g.appendChild(x1); g.appendChild(x2);
+    } else {
+      const tri = svgEl('polygon', {
+        points: `0,${-size} ${size*0.7},${size*0.5} ${-size*0.7},${size*0.5}`,
+        fill: color,
+        opacity: '0.9',
+      });
+      g.appendChild(tri);
+    }
+    return g;
+  }
+
+  /* ==========================================================
+     UPDATE MAP
+  ========================================================== */
+  function updateMap(data) {
+    const poiLayer   = document.getElementById('poi-layer');
+    const uavLayer   = document.getElementById('uav-layer');
+    const relayLayer = document.getElementById('relay-chain');
+
+    // Clear layers
+    poiLayer.innerHTML   = '';
+    uavLayer.innerHTML   = '';
+    relayLayer.innerHTML = '';
+
+    // ── PoIs ──────────────────────────────────────────────────
+    for (const poi of (data.pois || [])) {
+      const [sx, sy] = toSVG(poi.x, poi.y);
+      const col = poiColor(poi.priority);
+
+      // Status ring fill: PENDING=0%, ASSIGNED=50%, SURVEYED=100%
+      let fillOpacity = 0;
+      if (poi.status === 'ASSIGNED')  fillOpacity = 0.25;
+      if (poi.status === 'SURVEYED')  fillOpacity = 0.55;
+
+      // Outer ring
+      const ring = svgEl('circle', {
+        cx: sx, cy: sy, r: 11,
+        fill: col, 'fill-opacity': fillOpacity,
+        stroke: col, 'stroke-width': 1.5,
+      });
+      poiLayer.appendChild(ring);
+
+      // Survivor pulse ring
+      if (poi.survivor_detected) {
+        const pulse = svgEl('circle', {
+          cx: sx, cy: sy, r: 15,
+          fill: 'none', stroke: '#ff4444', 'stroke-width': 1,
+          opacity: 0.6,
+        });
+        poiLayer.appendChild(pulse);
+      }
+
+      // Label
+      const lbl = svgEl('text', {
+        x: sx, y: sy + 20,
+        'text-anchor': 'middle',
+        'font-family': 'Courier New',
+        'font-size': 8,
+        fill: col,
+      });
+      lbl.textContent = poi.id;
+      poiLayer.appendChild(lbl);
+    }
+
+    // ── Relay chain lines ──────────────────────────────────────
+    const relayUAVs = (data.uavs || []).filter(
+      u => u.role === 'Relay' && u.status === 'Active'
+    );
+    drawRelayChain(relayUAVs, relayLayer);
+
+    // ── UAVs ──────────────────────────────────────────────────
+    for (const uav of (data.uavs || [])) {
+      const [sx, sy] = toSVG(uav.x, uav.y);
+      const col  = roleColor(uav.role);
+      const fail = uav.status === 'Failed';
+      const size = 6;
+
+      const g = uavTriangle(sx, sy, size, col, fail);
+
+      // Pulsing effect for active scouts
+      if (uav.role === 'Scout' && uav.status === 'Active') {
+        const pulseCirc = svgEl('circle', {
+          cx: 0, cy: 0, r: 5,
+          fill: col, 'fill-opacity': 0.3,
+          class: 'uav-pulse',
+        });
+        g.insertBefore(pulseCirc, g.firstChild);
+      }
+
+      // UAV id label
+      const lbl = svgEl('text', {
+        x: sx, y: sy - 10,
+        'text-anchor': 'middle',
+        'font-family': 'Courier New',
+        'font-size': 7,
+        fill: fail ? '#ff4444' : col,
+      });
+      lbl.textContent = uav.id.replace('UAV-', '');
+      uavLayer.appendChild(lbl);
+      uavLayer.appendChild(g);
+    }
+  }
+
+  /* ==========================================================
+     RELAY CHAIN
+  ========================================================== */
+  function drawRelayChain(relayUAVs, layer) {
+    if (!relayUAVs.length) return;
+
+    // Sort relay UAVs by their distance from GCS (approx by x + y)
+    const sorted = relayUAVs.slice().sort((a, b) => (a.x + a.y) - (b.x + b.y));
+
+    const [gcsSX, gcsSY] = toSVG(0, 0);   // GCS SVG coords
+
+    // GCS → first relay
+    const [fx, fy] = toSVG(sorted[0].x, sorted[0].y);
+    const line0 = svgEl('line', {
+      x1: gcsSX, y1: gcsSY, x2: fx, y2: fy,
+      stroke: '#00d4ff', 'stroke-width': 1,
+      'stroke-dasharray': '5 4', opacity: 0.5,
+    });
+    layer.appendChild(line0);
+
+    // Relay → relay chain
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const [ax, ay] = toSVG(sorted[i].x, sorted[i].y);
+      const [bx, by] = toSVG(sorted[i+1].x, sorted[i+1].y);
+      const ln = svgEl('line', {
+        x1: ax, y1: ay, x2: bx, y2: by,
+        stroke: '#00d4ff', 'stroke-width': 1,
+        'stroke-dasharray': '5 4', opacity: 0.5,
+      });
+      layer.appendChild(ln);
+    }
+  }
+
+  /* ==========================================================
+     UPDATE FLEET TABLE
+  ========================================================== */
+  function updateFleet(data) {
+    const tbody = document.getElementById('fleet-tbody');
+    const uavs  = data.uavs || [];
+    if (!uavs.length) return;
+
+    tbody.innerHTML = '';
+    for (const uav of uavs) {
+      const tr = document.createElement('tr');
+
+      // ID
+      const tdId = document.createElement('td');
+      tdId.className = 'uav-id';
+      tdId.textContent = uav.id;
+      tr.appendChild(tdId);
+
+      // Role
+      const tdRole = document.createElement('td');
+      let roleClass = 'role-idle';
+      if (uav.status === 'Failed') roleClass = 'role-failed';
+      else if (uav.role === 'Scout') roleClass = 'role-scout';
+      else if (uav.role === 'Relay') roleClass = 'role-relay';
+      else if (uav.role === 'RTL')   roleClass = 'role-rtl';
+      tdRole.className = roleClass;
+      tdRole.textContent = uav.status === 'Failed' ? 'FAILED' : uav.role.toUpperCase();
+      tr.appendChild(tdRole);
+
+      // Battery bar
+      const tdBat = document.createElement('td');
+      const batClass = uav.battery > 50 ? 'bat-green' : uav.battery > 25 ? 'bat-orange' : 'bat-red';
+      tdBat.innerHTML = `
+        <div class="bat-bar-wrap">
+          <div class="bat-bar ${batClass}" style="width:${Math.max(0,uav.battery)}%"></div>
+        </div>
+        <span class="bat-label">${uav.battery}%</span>
+      `;
+      tr.appendChild(tdBat);
+
+      // Status badge
+      const tdStat = document.createElement('td');
+      let sbClass = 'sb-active';
+      if (uav.status === 'Failed')      sbClass = 'sb-failed';
+      else if (uav.status === 'Landed') sbClass = 'sb-landed';
+      else if (uav.status === 'LowBattery') sbClass = 'sb-lowbat';
+      tdStat.innerHTML = `<span class="status-badge ${sbClass}">${uav.status}</span>`;
+      tr.appendChild(tdStat);
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  /* ==========================================================
+     UPDATE EVENT LOG
+  ========================================================== */
+  function updateEvents(events) {
+    const container = document.getElementById('event-scroll');
+    if (!events || !events.length) return;
+
+    container.innerHTML = '';
+    for (const ev of events) {
+      const div = document.createElement('div');
+      div.className = 'event-item';
+      const typeClass = eventClass(ev.type);
+      div.innerHTML =
+        `<span class="event-tick">[${ev.tick}]</span>` +
+        `<span class="event-type ${typeClass}">${ev.type}</span>` +
+        `<span class="event-msg">${ev.actor}: ${ev.message}</span>`;
+      container.appendChild(div);
+    }
+    // Auto-scroll to bottom
+    container.scrollTop = container.scrollHeight;
+  }
+
+  /* ==========================================================
+     UPDATE STATS BAR
+  ========================================================== */
+  function updateStats(data) {
+    document.getElementById('stat-surveyed').textContent  = data.pois_surveyed    || 0;
+    document.getElementById('stat-packets').textContent   = data.packets_delivered || 0;
+    document.getElementById('stat-active').textContent    = data.uavs_active      || 0;
+    document.getElementById('stat-survivors').textContent = data.survivors_found   || 0;
+
+    const net = data.network || {};
+    const total   = net.total_nodes     || 1;
+    const reach   = net.reachable_to_gcs || 0;
+    const pct     = Math.round((reach / total) * 100);
+    document.getElementById('stat-coverage').textContent = pct + '%';
+  }
+
+  /* ==========================================================
+     CLOCK
+  ========================================================== */
+  function updateClock() {
+    const now = new Date();
+    const hh  = String(now.getHours()).padStart(2, '0');
+    const mm  = String(now.getMinutes()).padStart(2, '0');
+    const ss  = String(now.getSeconds()).padStart(2, '0');
+    document.getElementById('hdr-clock').textContent = `${hh}:${mm}:${ss}`;
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  /* ==========================================================
+     MAIN FETCH LOOP
+  ========================================================== */
+  let _lastEventCount = 0;
+
+  async function fetchStatus() {
+    try {
+      const resp = await fetch('/api/status');
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      // Tick counter in header
+      document.getElementById('hdr-tick-val').textContent = data.tick || 0;
+
+      updateMap(data);
+      updateFleet(data);
+      updateStats(data);
+      latestSimData = data;
+      if (currentView === '3d') {
+        update3D(data);
+      }
+
+      // Mission complete banner
+      if (data.complete) {
+        document.getElementById('complete-banner').style.display = 'block';
+      } else {
+        document.getElementById('complete-banner').style.display = 'none';
+      }
+
+      // Only re-fetch events if log grew
+      const evLen = (data.event_log || []).length;
+      if (evLen !== _lastEventCount) {
+        _lastEventCount = evLen;
+        fetchEvents();
+      }
+    } catch (e) {
+      // Server not yet up — silently ignore
+    }
+  }
+
+  async function fetchEvents() {
+    try {
+      const resp = await fetch('/api/events');
+      if (!resp.ok) return;
+      const events = await resp.json();
+      updateEvents(events);
+    } catch (e) { /* ignore */ }
+  }
+
+  // Poll every 1500 ms
+  setInterval(fetchStatus, 1500);
+  fetchStatus();  // immediate first call
+
+  /* ==========================================================
+     CONTROL BUTTONS
+  ========================================================== */
+  async function startMission() {
+    try {
+      const resp = await fetch('/api/run', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticks: 300, fault_tick: 80 }),
+      });
+      const data = await resp.json();
+      if (!data.started) {
+        // Already running — just show that
+        console.log('Simulation already running:', data.reason);
+      }
+    } catch (e) {
+      console.error('Failed to start mission:', e);
+    }
+  }
+
+  async function resetMission() {
+    try {
+      await fetch('/api/reset');
+      _lastEventCount = 0;
+      document.getElementById('hdr-tick-val').textContent = 0;
+      document.getElementById('fleet-tbody').innerHTML =
+        '<tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:16px 0;">No data — start mission</td></tr>';
+      document.getElementById('event-scroll').innerHTML =
+        '<div class="event-item" style="color:var(--text-dim);text-align:center;padding-top:20px;">Waiting for events…</div>';
+      document.getElementById('poi-layer').innerHTML   = '';
+      document.getElementById('uav-layer').innerHTML   = '';
+      document.getElementById('relay-chain').innerHTML = '';
+      document.getElementById('complete-banner').style.display = 'none';
+      ['stat-surveyed','stat-packets','stat-active','stat-coverage','stat-survivors']
+        .forEach(id => {
+          document.getElementById(id).textContent =
+            id === 'stat-coverage' ? '0%' : '0';
+        });
+    } catch (e) {
+      console.error('Failed to reset:', e);
+    }
+  }
+
+  /* ==========================================================
+     3D BATTLESPACE VIEWPORT (Three.js + OrbitControls)
+  ========================================================== */
+  let currentView = '2d';
+  let threeSceneInit = false;
+  let scene3D, camera3D, renderer3D, controls3D;
+  let uav3DMeshes = {};
+  let poi3DMeshes = {};
+  let relayLinks3D = [];
+  let radarDishMesh;
+  let latestSimData = null;
+
+  function switchView(mode) {
+    currentView = mode;
+    const svgMap = document.getElementById('mission-map');
+    const container3D = document.getElementById('threejs-container');
+    const btn2D = document.getElementById('btn-view-2d');
+    const btn3D = document.getElementById('btn-view-3d');
+
+    if (mode === '2d') {
+      svgMap.style.display = 'block';
+      container3D.style.display = 'none';
+      btn2D.classList.add('active');
+      btn3D.classList.remove('active');
+    } else {
+      svgMap.style.display = 'none';
+      container3D.style.display = 'block';
+      btn2D.classList.remove('active');
+      btn3D.classList.add('active');
+      if (!threeSceneInit) {
+        initThreeJS();
+      }
+      if (controls3D) controls3D.update();
+      if (latestSimData) update3D(latestSimData);
+    }
+  }
+
+  function resetCameraView(preset) {
+    if (!camera3D || !controls3D) return;
+    if (preset === 'iso') {
+      camera3D.position.set(1100, 750, 1500);
+      controls3D.target.set(1100, 0, 600);
+    } else if (preset === 'top') {
+      camera3D.position.set(1100, 1800, 600);
+      controls3D.target.set(1100, 0, 600);
+    } else if (preset === 'front') {
+      camera3D.position.set(-150, 250, 500);
+      controls3D.target.set(900, 40, 500);
+    }
+    controls3D.update();
+  }
+
+  function initThreeJS() {
+    if (typeof THREE === 'undefined') {
+      console.warn('Three.js not loaded');
+      return;
+    }
+    const holder = document.getElementById('threejs-canvas-holder');
+    const w = holder.clientWidth || 700;
+    const h = holder.clientHeight || 450;
+
+    scene3D = new THREE.Scene();
+    scene3D.background = new THREE.Color(0x060810);
+    scene3D.fog = new THREE.FogExp2(0x060810, 0.00045);
+
+    camera3D = new THREE.PerspectiveCamera(50, w / h, 10, 8000);
+    camera3D.position.set(1100, 750, 1500);
+
+    renderer3D = new THREE.WebGLRenderer({ antialias: true });
+    renderer3D.setSize(w, h);
+    renderer3D.setPixelRatio(window.devicePixelRatio || 1);
+    holder.appendChild(renderer3D.domElement);
+
+    if (typeof THREE.OrbitControls !== 'undefined') {
+      controls3D = new THREE.OrbitControls(camera3D, renderer3D.domElement);
+      controls3D.target.set(1100, 0, 600);
+      controls3D.enableDamping = true;
+      controls3D.dampingFactor = 0.08;
+      controls3D.maxPolarAngle = Math.PI / 2 - 0.02;
+      controls3D.minDistance = 50;
+      controls3D.maxDistance = 4500;
+    }
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x556688, 1.2);
+    scene3D.add(ambientLight);
+    const sunLight = new THREE.DirectionalLight(0xaaccff, 1.4);
+    sunLight.position.set(1200, 1500, 800);
+    scene3D.add(sunLight);
+
+    // Ground Grid & Disaster Terrain
+    const grid = new THREE.GridHelper(2600, 26, 0x00d4ff, 0x111c38);
+    grid.position.set(1100, 0, 700);
+    scene3D.add(grid);
+
+    // Ground Surface
+    const groundGeo = new THREE.PlaneGeometry(2800, 1800);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x070b14, roughness: 0.9, metalness: 0.1 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(1100, -1, 700);
+    scene3D.add(ground);
+
+    // Collapsed Disaster Buildings (Simulated Earthquake Rubble)
+    const buildingCoords = [
+      {x: 520, z: 320, sx: 55, sy: 20, sz: 45, rot: 0.2},
+      {x: 880, z: 120, sx: 70, sy: 35, sz: 50, rot: -0.15},
+      {x: 1220, z: 620, sx: 60, sy: 18, sz: 70, rot: 0.4},
+      {x: 720, z: 880, sx: 80, sy: 22, sz: 40, rot: -0.3},
+      {x: 1480, z: 210, sx: 90, sy: 28, sz: 65, rot: 0.1},
+      {x: 1780, z: 780, sx: 45, sy: 15, sz: 55, rot: 0.5},
+      {x: 310, z: 1080, sx: 60, sy: 25, sz: 60, rot: -0.2}
+    ];
+
+    const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x18243c, roughness: 0.8, metalness: 0.2 });
+
+    buildingCoords.forEach(b => {
+      const bGeo = new THREE.BoxGeometry(b.sx, b.sy, b.sz);
+      const bMesh = new THREE.Mesh(bGeo, rubbleMat);
+      bMesh.position.set(b.x, b.sy / 2, b.z);
+      bMesh.rotation.y = b.rot;
+      scene3D.add(bMesh);
+
+      for (let k = 0; k < 3; k++) {
+        const slabGeo = new THREE.BoxGeometry(14, 4, 18);
+        const slab = new THREE.Mesh(slabGeo, rubbleMat);
+        slab.position.set(b.x + (k - 1) * 25, 2, b.z + (k % 2 === 0 ? 20 : -20));
+        slab.rotation.set(0.2 * k, 0.5 * k, 0.1 * k);
+        scene3D.add(slab);
+      }
+    });
+
+    // GCS Command Outpost at (0, 0, 0)
+    const gcsGroup = new THREE.Group();
+    const gcsBaseGeo = new THREE.CylinderGeometry(28, 32, 8, 8);
+    const gcsBaseMat = new THREE.MeshStandardMaterial({ color: 0x00d4ff, metalness: 0.6, roughness: 0.4 });
+    const gcsBase = new THREE.Mesh(gcsBaseGeo, gcsBaseMat);
+    gcsBase.position.y = 4;
+    gcsGroup.add(gcsBase);
+
+    // Rotating Radar Dish
+    const dishGeo = new THREE.SphereGeometry(12, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+    const dishMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, wireframe: true });
+    radarDishMesh = new THREE.Mesh(dishGeo, dishMat);
+    radarDishMesh.position.set(0, 20, 0);
+    radarDishMesh.rotation.x = Math.PI / 3;
+    gcsGroup.add(radarDishMesh);
+    gcsGroup.position.set(0, 0, 0);
+    scene3D.add(gcsGroup);
+
+    threeSceneInit = true;
+    animateThreeJS();
+  }
+
+  function createQuadcopter3D(id, role) {
+    const drone = new THREE.Group();
+
+    // Central Avionics Hub
+    const bodyGeo = new THREE.CylinderGeometry(8, 10, 6, 8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x141e32, metalness: 0.8, roughness: 0.3 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 3;
+    drone.add(body);
+
+    // Status LED Dome on Top
+    const ledColor = role === 'Relay' ? 0x4488ff : (role === 'Scout' ? 0x00d4ff : (role === 'RTL' ? 0xff8c00 : 0x8899aa));
+    const ledGeo = new THREE.SphereGeometry(4, 12, 12);
+    const ledMat = new THREE.MeshBasicMaterial({ color: ledColor });
+    const led = new THREE.Mesh(ledGeo, ledMat);
+    led.position.y = 8;
+    drone.add(led);
+    drone.ledMesh = led;
+
+    // 4 Diagonal Carbon Fiber Arms & Motors & Propellers
+    const armOffsets = [
+      {x:  15, z:  15},
+      {x: -15, z:  15},
+      {x: -15, z: -15},
+      {x:  15, z: -15}
+    ];
+
+    drone.rotors = [];
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x222a3a, metalness: 0.9, roughness: 0.2 });
+    const motorMat = new THREE.MeshStandardMaterial({ color: 0x00d4ff, metalness: 0.5 });
+    const propMat = new THREE.MeshBasicMaterial({ color: 0x00e1ff, transparent: true, opacity: 0.6 });
+
+    armOffsets.forEach(pos => {
+      const armLength = Math.sqrt(pos.x * pos.x + pos.z * pos.z);
+      const armGeo = new THREE.CylinderGeometry(1.2, 1.2, armLength, 6);
+      const arm = new THREE.Mesh(armGeo, armMat);
+      arm.position.set(pos.x / 2, 3, pos.z / 2);
+      arm.rotation.z = Math.PI / 2;
+      arm.rotation.y = Math.atan2(pos.z, pos.x);
+      drone.add(arm);
+
+      const motorGeo = new THREE.CylinderGeometry(2.5, 2.5, 4, 8);
+      const motor = new THREE.Mesh(motorGeo, motorMat);
+      motor.position.set(pos.x, 4, pos.z);
+      drone.add(motor);
+
+      const propGeo = new THREE.CylinderGeometry(9, 9, 0.4, 16);
+      const prop = new THREE.Mesh(propGeo, propMat);
+      prop.position.set(pos.x, 6.2, pos.z);
+      drone.add(prop);
+      drone.rotors.push(prop);
+    });
+
+    // Altitude Ground Shadow Tether
+    const lineMat = new THREE.LineDashedMaterial({ color: 0x1e3060, dashSize: 4, gapSize: 3 });
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -60, 0)]);
+    const tether = new THREE.Line(lineGeo, lineMat);
+    tether.computeLineDistances();
+    drone.add(tether);
+
+    drone.uavId = id;
+    drone.activeRPMSpeed = 0.35;
+    return drone;
+  }
+
+  function createPoI3D(id, priority) {
+    const poi = new THREE.Group();
+    const colors = {
+      CRITICAL: 0xff4444,
+      HIGH:     0xff8c00,
+      MEDIUM:   0xffd700,
+      LOW:      0x00ff88
+    };
+    const col = colors[priority] || 0x00d4ff;
+
+    // Glowing Vertical Light Column
+    const colGeo = new THREE.CylinderGeometry(12, 12, 220, 16, 1, true);
+    const colMat = new THREE.MeshBasicMaterial({
+      color: col,
+      transparent: true,
+      opacity: 0.28,
+      side: THREE.DoubleSide
+    });
+    const colMesh = new THREE.Mesh(colGeo, colMat);
+    colMesh.position.y = 110;
+    poi.add(colMesh);
+
+    // Ground Target Ring
+    const ringGeo = new THREE.RingGeometry(8, 26, 24);
+    const ringMat = new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 1;
+    poi.add(ring);
+
+    poi.pillar = colMesh;
+    poi.ring = ring;
+    return poi;
+  }
+
+  function update3D(data) {
+    if (!threeSceneInit || !scene3D) return;
+
+    // Update / Create PoIs
+    (data.pois || []).forEach(p => {
+      let poiMesh = poi3DMeshes[p.id];
+      if (!poiMesh) {
+        poiMesh = createPoI3D(p.id, p.priority);
+        poiMesh.position.set(p.x, 0, p.y);
+        scene3D.add(poiMesh);
+        poi3DMeshes[p.id] = poiMesh;
+      }
+      if (p.status === 'SURVEYED') {
+        poiMesh.pillar.material.opacity = 0.12;
+      }
+      if (p.survivor_detected) {
+        poiMesh.pillar.material.color.setHex(0xff0055);
+        poiMesh.pillar.material.opacity = 0.65;
+      }
+    });
+
+    // Update / Create UAVs
+    const relayPositions = [];
+    (data.uavs || []).forEach(u => {
+      let drone = uav3DMeshes[u.id];
+      if (!drone) {
+        drone = createQuadcopter3D(u.id, u.role);
+        scene3D.add(drone);
+        uav3DMeshes[u.id] = drone;
+      }
+
+      const alt = u.status === 'Landed' ? 4 : (u.z > 5 ? u.z : 48);
+      drone.position.set(u.x, alt, u.y);
+
+      if (u.pitch) drone.rotation.x = THREE.MathUtils.degToRad(u.pitch);
+      if (u.roll)  drone.rotation.z = THREE.MathUtils.degToRad(u.roll);
+      if (u.yaw)   drone.rotation.y = -THREE.MathUtils.degToRad(u.yaw);
+
+      if (u.status === 'Failed') {
+        drone.rotation.z = 0.8;
+        drone.activeRPMSpeed = 0.0;
+        drone.ledMesh.material.color.setHex(0xff0000);
+      } else {
+        drone.activeRPMSpeed = (u.role === 'Idle' && u.status === 'Landed') ? 0.05 : 0.45;
+        const ledCol = u.role === 'Relay' ? 0x4488ff : (u.role === 'Scout' ? 0x00d4ff : (u.role === 'RTL' ? 0xff8c00 : 0x8899aa));
+        drone.ledMesh.material.color.setHex(ledCol);
+      }
+
+      if (u.role === 'Relay' && u.status === 'Active') {
+        relayPositions.push(new THREE.Vector3(u.x, alt, u.y));
+      }
+    });
+
+    // Update 3D Relay Laser Links
+    relayLinks3D.forEach(line => scene3D.remove(line));
+    relayLinks3D = [];
+
+    if (relayPositions.length > 0) {
+      relayPositions.sort((a, b) => a.length() - b.length());
+      const chainNodes = [new THREE.Vector3(0, 15, 0), ...relayPositions];
+
+      for (let i = 0; i < chainNodes.length - 1; i++) {
+        const start = chainNodes[i];
+        const end   = chainNodes[i + 1];
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([start, end]);
+        const lineMat = new THREE.LineBasicMaterial({
+          color: 0x00ffff,
+          linewidth: 2,
+          transparent: true,
+          opacity: 0.85
+        });
+        const laser = new THREE.Line(lineGeo, lineMat);
+        scene3D.add(laser);
+        relayLinks3D.push(laser);
+      }
+    }
+  }
+
+  function animateThreeJS() {
+    requestAnimationFrame(animateThreeJS);
+
+    if (radarDishMesh) {
+      radarDishMesh.rotation.y += 0.03;
+    }
+
+    Object.values(uav3DMeshes).forEach(drone => {
+      if (drone.rotors && drone.activeRPMSpeed > 0) {
+        drone.rotors[0].rotation.y += drone.activeRPMSpeed;
+        drone.rotors[1].rotation.y -= drone.activeRPMSpeed;
+        drone.rotors[2].rotation.y += drone.activeRPMSpeed;
+        drone.rotors[3].rotation.y -= drone.activeRPMSpeed;
+      }
+    });
+
+    const time = Date.now() * 0.003;
+    Object.values(poi3DMeshes).forEach(poi => {
+      if (poi.pillar) {
+        poi.pillar.scale.set(1 + Math.sin(time) * 0.06, 1, 1 + Math.sin(time) * 0.06);
+      }
+    });
+
+    // Chase camera tracking
+    if (chaseCamActive && uav3DMeshes[chaseTargetId] && camera3D && controls3D) {
+      const targetDrone = uav3DMeshes[chaseTargetId];
+      const offset = new THREE.Vector3(-60, 28, -60);
+      camera3D.position.lerp(targetDrone.position.clone().add(offset), 0.08);
+      controls3D.target.lerp(targetDrone.position, 0.1);
+    }
+
+    if (controls3D) {
+      controls3D.update();
+    }
+
+    if (renderer3D && scene3D && camera3D) {
+      renderer3D.render(scene3D, camera3D);
+    }
+  }
+
+  /* ==========================================================
+     CHASE CAM & THERMAL IR SENSOR SIMULATION
+  ========================================================== */
+  let chaseCamActive = false;
+  let chaseTargetId = 'UAV-06';
+  let thermalPiPActive = true;
+
+  function toggleChaseCam() {
+    chaseCamActive = !chaseCamActive;
+    const btn = document.getElementById('btn-chase-cam');
+    if (chaseCamActive) {
+      // Pick first active scout if available
+      if (latestSimData && latestSimData.uavs) {
+        const scout = latestSimData.uavs.find(u => u.role === 'Scout') || latestSimData.uavs[0];
+        if (scout) chaseTargetId = scout.id;
+      }
+      btn.classList.add('active');
+      document.getElementById('cam-hud').textContent =
+        `3D CHASE CAM: FOLLOWING [${chaseTargetId}] | FPV STABILIZED`;
+    } else {
+      btn.classList.remove('active');
+      document.getElementById('cam-hud').textContent =
+        '3D BATTLESPACE: ORBIT [LEFT-CLICK: ROTATE | RIGHT-CLICK: PAN | SCROLL: ZOOM]';
+      resetCameraView('iso');
+    }
+  }
+
+  function toggleThermalPiP() {
+    thermalPiPActive = !thermalPiPActive;
+    const pip = document.getElementById('thermal-pip');
+    const btn = document.getElementById('btn-pip-cam');
+    if (thermalPiPActive) {
+      pip.style.display = 'flex';
+      btn.classList.add('active');
+    } else {
+      pip.style.display = 'none';
+      btn.classList.remove('active');
+    }
+  }
+
+  // Procedural Thermal Infrared Camera Canvas Rendering
+  const thermalCanvas = document.getElementById('thermal-canvas');
+  const tCtx = thermalCanvas ? thermalCanvas.getContext('2d') : null;
+  let thermalFrameCount = 0;
+
+  function renderThermalFrame(survivorFound, tempC, conf, activePoiId, uavId) {
+    if (!tCtx) return;
+    thermalFrameCount++;
+    const w = thermalCanvas.width;
+    const h = thermalCanvas.height;
+
+    // Update OSD tags
+    if (uavId) document.getElementById('pip-uav-id').textContent = uavId;
+    if (activePoiId) document.getElementById('pip-status').textContent = `TARGET: ${activePoiId}`;
+
+    // Cold rubble background gradient
+    const grad = tCtx.createRadialGradient(w/2, h/2, 10, w/2, h/2, w/1.2);
+    grad.addColorStop(0, '#151025');
+    grad.addColorStop(0.5, '#0c0e1a');
+    grad.addColorStop(1, '#06070e');
+    tCtx.fillStyle = grad;
+    tCtx.fillRect(0, 0, w, h);
+
+    // Concrete rubble slabs with slight thermal signature
+    tCtx.fillStyle = 'rgba(70, 30, 80, 0.4)';
+    tCtx.fillRect(25, 20, 65, 35);
+    tCtx.fillRect(115, 45, 75, 30);
+
+    const bbox = document.getElementById('thermal-bbox');
+    const osdTemp = document.getElementById('osd-temp');
+
+    if (survivorFound) {
+      const hx = w / 2 + Math.sin(thermalFrameCount * 0.08) * 3;
+      const hy = h / 2 + Math.cos(thermalFrameCount * 0.06) * 2;
+
+      // Heat core bloom (37°C body signature)
+      const heatGrad = tCtx.createRadialGradient(hx, hy, 2, hx, hy, 28);
+      heatGrad.addColorStop(0, '#ffffff');
+      heatGrad.addColorStop(0.2, '#ffee44');
+      heatGrad.addColorStop(0.5, '#ff5500');
+      heatGrad.addColorStop(0.8, '#aa1144');
+      heatGrad.addColorStop(1, 'transparent');
+      tCtx.fillStyle = heatGrad;
+      tCtx.beginPath();
+      tCtx.arc(hx, hy, 28, 0, Math.PI * 2);
+      tCtx.fill();
+
+      if (bbox) {
+        bbox.style.display = 'block';
+        bbox.style.left = Math.round(hx - 32) + 'px';
+        bbox.style.top  = Math.round(hy - 22) + 'px';
+        bbox.textContent = `HUMAN [${Math.round((conf || 0.95) * 100)}%]`;
+      }
+      if (osdTemp) osdTemp.textContent = `${tempC || 36.8}°C [CRITICAL]`;
+    } else {
+      if (bbox) bbox.style.display = 'none';
+      if (osdTemp) osdTemp.textContent = `${tempC || 19.4}°C [NOMINAL]`;
+    }
+
+    // Thermal scanlines
+    tCtx.fillStyle = 'rgba(255, 255, 255, 0.035)';
+    for (let y = 0; y < h; y += 4) {
+      tCtx.fillRect(0, y, w, 1);
+    }
+
+    // Reticle crosshairs
+    tCtx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
+    tCtx.lineWidth = 1;
+    tCtx.beginPath();
+    tCtx.moveTo(w/2 - 16, h/2); tCtx.lineTo(w/2 - 4, h/2);
+    tCtx.moveTo(w/2 + 4, h/2);  tCtx.lineTo(w/2 + 16, h/2);
+    tCtx.moveTo(w/2, h/2 - 16); tCtx.lineTo(w/2, h/2 - 4);
+    tCtx.moveTo(w/2, h/2 + 4);  tCtx.lineTo(w/2, h/2 + 16);
+    tCtx.stroke();
+  }
+
+  // Animate thermal IR frame continuously
+  setInterval(() => {
+    if (thermalPiPActive && latestSimData) {
+      const survivorPoi = (latestSimData.pois || []).find(p => p.survivor_detected);
+      const activeScout = (latestSimData.uavs || []).find(u => u.role === 'Scout') || (latestSimData.uavs || [])[0];
+      const hasSurvivor = !!survivorPoi;
+      renderThermalFrame(
+        hasSurvivor,
+        hasSurvivor ? 36.8 : 19.4,
+        0.96,
+        survivorPoi ? survivorPoi.id : (activeScout ? activeScout.assigned_poi : 'SEARCHING'),
+        activeScout ? activeScout.id : 'UAV-06'
+      );
+    }
+  }, 100);
+</script>
+
+</body>
+</html>

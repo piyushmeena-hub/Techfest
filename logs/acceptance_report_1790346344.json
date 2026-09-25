@@ -1,0 +1,424 @@
+{
+  "timestamp": 1790346344,
+  "summary": {
+    "total_pois": 7,
+    "surveyed_pois": 6,
+    "pending_pois": 0,
+    "survivors_detected": 1,
+    "survivor_pois": [
+      "POI-A"
+    ],
+    "packets_delivered": 6,
+    "failed_uavs": [
+      "UAV-05",
+      "UAV-06",
+      "UAV-07",
+      "UAV-08",
+      "UAV-10"
+    ],
+    "total_events": 39
+  },
+  "network": {
+    "total_nodes": 10,
+    "reachable_to_gcs": 10,
+    "isolated_nodes": [],
+    "active_links": 26,
+    "weak_links": 11,
+    "down_links": 3
+  },
+  "acceptance_tests": [
+    {
+      "test": "PoI Surveying",
+      "passed": true,
+      "evidence": "6/7 PoIs surveyed (85%)",
+      "details": [
+        "POI-A",
+        "POI-B",
+        "POI-C",
+        "POI-E",
+        "POI-F",
+        "POI-G"
+      ]
+    },
+    {
+      "test": "End-to-End GCS Delivery",
+      "passed": true,
+      "evidence": "6 packets delivered to GCS out of 6 surveyed PoIs",
+      "details": [
+        "PKT-0001",
+        "PKT-0002",
+        "PKT-0003",
+        "PKT-0004",
+        "PKT-0005",
+        "PKT-0006"
+      ]
+    },
+    {
+      "test": "Relay Reassignment",
+      "passed": true,
+      "evidence": "5 RTL events triggered, 4 relay assignments made",
+      "details": [
+        {
+          "tick": 0,
+          "type": "RELAY_ASSIGN",
+          "actor": "UAV-01",
+          "message": "Assigned to relay slot 0 at Pos(360.0, 160.0, alt=50.0)"
+        },
+        {
+          "tick": 0,
+          "type": "RELAY_ASSIGN",
+          "actor": "UAV-02",
+          "message": "Assigned to relay slot 1 at Pos(720.0, 320.0, alt=50.0)"
+        },
+        {
+          "tick": 0,
+          "type": "RELAY_ASSIGN",
+          "actor": "UAV-03",
+          "message": "Assigned to relay slot 2 at Pos(1080.0, 480.0, alt=50.0)"
+        },
+        {
+          "tick": 0,
+          "type": "RELAY_ASSIGN",
+          "actor": "UAV-04",
+          "message": "Assigned to relay slot 3 at Pos(1440.0, 640.0, alt=50.0)"
+        }
+      ]
+    },
+    {
+      "test": "Communication Recovery",
+      "passed": true,
+      "evidence": "2 delivery failures recovered, 6 eventual deliveries",
+      "details": {
+        "failures": 2,
+        "recoveries": 6
+      }
+    },
+    {
+      "test": "Priority Data Handling",
+      "passed": true,
+      "evidence": "Critical packets avg delivery tick: [48, 113], Low: [171]",
+      "details": {
+        "critical_count": 2,
+        "low_count": 1
+      }
+    },
+    {
+      "test": "Battery-Aware RTL (No Crashes)",
+      "passed": false,
+      "evidence": "5 RTL events triggered, 4 battery-crash failures",
+      "details": [
+        "UAV-06",
+        "UAV-07",
+        "UAV-08",
+        "UAV-10"
+      ]
+    },
+    {
+      "test": "No UAV Crashes / Safety",
+      "passed": false,
+      "evidence": "5 UAV failures detected",
+      "details": [
+        "UAV-05",
+        "UAV-06",
+        "UAV-07",
+        "UAV-08",
+        "UAV-10"
+      ]
+    },
+    {
+      "test": "Reproducible Logs",
+      "passed": true,
+      "evidence": "Event log: 39 entries. GCS log: 6 entries. Telemetry: Complete",
+      "details": {
+        "event_count": 39
+      }
+    }
+  ],
+  "all_passed": false,
+  "event_log": [
+    {
+      "tick": 0,
+      "type": "RELAY_ASSIGN",
+      "actor": "UAV-01",
+      "message": "Assigned to relay slot 0 at Pos(360.0, 160.0, alt=50.0)"
+    },
+    {
+      "tick": 0,
+      "type": "RELAY_ASSIGN",
+      "actor": "UAV-02",
+      "message": "Assigned to relay slot 1 at Pos(720.0, 320.0, alt=50.0)"
+    },
+    {
+      "tick": 0,
+      "type": "RELAY_ASSIGN",
+      "actor": "UAV-03",
+      "message": "Assigned to relay slot 2 at Pos(1080.0, 480.0, alt=50.0)"
+    },
+    {
+      "tick": 0,
+      "type": "RELAY_ASSIGN",
+      "actor": "UAV-04",
+      "message": "Assigned to relay slot 3 at Pos(1440.0, 640.0, alt=50.0)"
+    },
+    {
+      "tick": 0,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-05",
+      "message": "Assigned to PoI POI-A (priority=CRITICAL)"
+    },
+    {
+      "tick": 0,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-06",
+      "message": "Assigned to PoI POI-C (priority=CRITICAL)"
+    },
+    {
+      "tick": 0,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-07",
+      "message": "Assigned to PoI POI-B (priority=HIGH)"
+    },
+    {
+      "tick": 0,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-08",
+      "message": "Assigned to PoI POI-E (priority=HIGH)"
+    },
+    {
+      "tick": 0,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-09",
+      "message": "Assigned to PoI POI-D (priority=MEDIUM)"
+    },
+    {
+      "tick": 0,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-10",
+      "message": "Assigned to PoI POI-G (priority=MEDIUM)"
+    },
+    {
+      "tick": 26,
+      "type": "RTL",
+      "actor": "UAV-09",
+      "message": "Battery at 19.6% \u2014 returning to launch"
+    },
+    {
+      "tick": 48,
+      "type": "DATA_ENQUEUE",
+      "actor": "UAV-05",
+      "message": "Packet PKT-0001 queued (priority=CRITICAL)"
+    },
+    {
+      "tick": 48,
+      "type": "SURVEY_COMPLETE",
+      "actor": "UAV-05",
+      "message": "PoI POI-A surveyed. Survivor=True"
+    },
+    {
+      "tick": 48,
+      "type": "DELIVERED",
+      "actor": "UAV-05",
+      "message": "Packet PKT-0001 delivered via 1 hops"
+    },
+    {
+      "tick": 49,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-05",
+      "message": "Assigned to PoI POI-D (priority=MEDIUM)"
+    },
+    {
+      "tick": 51,
+      "type": "LANDED",
+      "actor": "UAV-09",
+      "message": "Safely landed at GCS"
+    },
+    {
+      "tick": 75,
+      "type": "DATA_ENQUEUE",
+      "actor": "UAV-07",
+      "message": "Packet PKT-0002 queued (priority=HIGH)"
+    },
+    {
+      "tick": 75,
+      "type": "SURVEY_COMPLETE",
+      "actor": "UAV-07",
+      "message": "PoI POI-B surveyed. Survivor=False"
+    },
+    {
+      "tick": 75,
+      "type": "DELIVERED",
+      "actor": "UAV-07",
+      "message": "Packet PKT-0002 delivered via 2 hops"
+    },
+    {
+      "tick": 76,
+      "type": "SCOUT_ASSIGN",
+      "actor": "UAV-07",
+      "message": "Assigned to PoI POI-F (priority=LOW)"
+    },
+    {
+      "tick": 80,
+      "type": "FAULT_INJECTED",
+      "actor": "UAV-05",
+      "message": "Relay UAV-05 intentionally killed \u2014 testing recovery"
+    },
+    {
+      "tick": 95,
+      "type": "DATA_ENQUEUE",
+      "actor": "UAV-10",
+      "message": "Packet PKT-0003 queued (priority=MEDIUM)"
+    },
+    {
+      "tick": 95,
+      "type": "SURVEY_COMPLETE",
+      "actor": "UAV-10",
+      "message": "PoI POI-G surveyed. Survivor=False"
+    },
+    {
+      "tick": 95,
+      "type": "DELIVERED",
+      "actor": "UAV-10",
+      "message": "Packet PKT-0003 delivered via 3 hops"
+    },
+    {
+      "tick": 111,
+      "type": "DATA_ENQUEUE",
+      "actor": "UAV-06",
+      "message": "Packet PKT-0004 queued (priority=CRITICAL)"
+    },
+    {
+      "tick": 111,
+      "type": "SURVEY_COMPLETE",
+      "actor": "UAV-06",
+      "message": "PoI POI-C surveyed. Survivor=False"
+    },
+    {
+      "tick": 111,
+      "type": "DELIVERY_FAIL",
+      "actor": "UAV-06",
+      "message": "Packet PKT-0004 delivery failed \u2014 will retry"
+    },
+    {
+      "tick": 112,
+      "type": "DELIVERY_FAIL",
+      "actor": "UAV-06",
+      "message": "Packet PKT-0004 delivery failed \u2014 will retry"
+    },
+    {
+      "tick": 113,
+      "type": "DELIVERED",
+      "actor": "UAV-06",
+      "message": "Packet PKT-0004 delivered via 3 hops"
+    },
+    {
+      "tick": 126,
+      "type": "DATA_ENQUEUE",
+      "actor": "UAV-08",
+      "message": "Packet PKT-0005 queued (priority=HIGH)"
+    },
+    {
+      "tick": 126,
+      "type": "SURVEY_COMPLETE",
+      "actor": "UAV-08",
+      "message": "PoI POI-E surveyed. Survivor=False"
+    },
+    {
+      "tick": 126,
+      "type": "DELIVERED",
+      "actor": "UAV-08",
+      "message": "Packet PKT-0005 delivered via 4 hops"
+    },
+    {
+      "tick": 171,
+      "type": "DATA_ENQUEUE",
+      "actor": "UAV-07",
+      "message": "Packet PKT-0006 queued (priority=LOW)"
+    },
+    {
+      "tick": 171,
+      "type": "SURVEY_COMPLETE",
+      "actor": "UAV-07",
+      "message": "PoI POI-F surveyed. Survivor=False"
+    },
+    {
+      "tick": 171,
+      "type": "DELIVERED",
+      "actor": "UAV-07",
+      "message": "Packet PKT-0006 delivered via 4 hops"
+    },
+    {
+      "tick": 200,
+      "type": "RTL",
+      "actor": "UAV-06",
+      "message": "Battery at 20.0% \u2014 returning to launch"
+    },
+    {
+      "tick": 200,
+      "type": "RTL",
+      "actor": "UAV-07",
+      "message": "Battery at 20.0% \u2014 returning to launch"
+    },
+    {
+      "tick": 200,
+      "type": "RTL",
+      "actor": "UAV-08",
+      "message": "Battery at 20.0% \u2014 returning to launch"
+    },
+    {
+      "tick": 200,
+      "type": "RTL",
+      "actor": "UAV-10",
+      "message": "Battery at 20.0% \u2014 returning to launch"
+    }
+  ],
+  "gcs_log": [
+    {
+      "tick": 48,
+      "packet_id": "PKT-0001",
+      "poi_id": "POI-A",
+      "priority": "CRITICAL",
+      "source": "UAV-05",
+      "latency_ticks": 0
+    },
+    {
+      "tick": 75,
+      "packet_id": "PKT-0002",
+      "poi_id": "POI-B",
+      "priority": "HIGH",
+      "source": "UAV-07",
+      "latency_ticks": 0
+    },
+    {
+      "tick": 95,
+      "packet_id": "PKT-0003",
+      "poi_id": "POI-G",
+      "priority": "MEDIUM",
+      "source": "UAV-10",
+      "latency_ticks": 0
+    },
+    {
+      "tick": 113,
+      "packet_id": "PKT-0004",
+      "poi_id": "POI-C",
+      "priority": "CRITICAL",
+      "source": "UAV-06",
+      "latency_ticks": 2
+    },
+    {
+      "tick": 126,
+      "packet_id": "PKT-0005",
+      "poi_id": "POI-E",
+      "priority": "HIGH",
+      "source": "UAV-08",
+      "latency_ticks": 0
+    },
+    {
+      "tick": 171,
+      "packet_id": "PKT-0006",
+      "poi_id": "POI-F",
+      "priority": "LOW",
+      "source": "UAV-07",
+      "latency_ticks": 0
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+# ==============================================================================
+# UAV-X Docker Compose Configuration
+# ==============================================================================
+# Orchestrates all UAV-X services:
+#   - gcs-dashboard   : Flask web dashboard for GCS operators (always-on)
+#   - simulation      : Phase-0 pure-Python swarm simulation
+#   - px4-sitl        : PX4 SITL + Gazebo 10-UAV fleet (profile: sitl)
+#   - ns3-comms       : NS-3 communications model (profile: comms)
+#
+# Usage:
+#   # Core services only:
+#   docker compose up
+#
+#   # With SITL (requires GPU / Gazebo image):
+#   docker compose --profile sitl up
+#
+#   # With NS-3 comms modelling:
+#   docker compose --profile comms up
+#
+#   # Full stack:
+#   docker compose --profile sitl --profile comms up
+#
+# Requirements:
+#   Docker >= 23.0, Docker Compose >= 2.17
+# ==============================================================================
+
+version: "3.8"
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # GCS Dashboard
+  # Flask web application providing real-time mission status, telemetry charts,
+  # UAV map, and operator controls.
+  # Accessible at http://localhost:5000 after startup.
+  # ----------------------------------------------------------------------------
+  gcs-dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: uavx/gcs-dashboard:latest
+    container_name: uavx-gcs-dashboard
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount entire project so Flask can serve static logs, JSON exports, etc.
+      - .:/workspace
+      # Persist SQLite telemetry DB between restarts
+      - dashboard-data:/app/data
+    networks:
+      - uavx-net
+    environment:
+      PYTHONUNBUFFERED: "1"
+      FLASK_APP: app.py
+      FLASK_ENV: production
+      GCS_HOST: "0.0.0.0"
+      GCS_PORT: "5000"
+      # Shared secret for API endpoints (override in .env)
+      API_SECRET: "${API_SECRET:-changeme}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # Phase-0 Simulation
+  # Runs the pure-Python swarm simulation for 300 ticks (headless).
+  # Writes JSON telemetry logs to ./logs/ which the dashboard can serve.
+  # ----------------------------------------------------------------------------
+  simulation:
+    build:
+      context: ./phase0_prototype
+      dockerfile: Dockerfile
+    image: uavx/simulation:latest
+    container_name: uavx-simulation
+    volumes:
+      # Read project source
+      - .:/workspace
+      # Write simulation logs (shared with dashboard)
+      - ./logs:/app/logs
+    networks:
+      - uavx-net
+    environment:
+      PYTHONUNBUFFERED: "1"
+      # Comma-separated list of GCS dashboard endpoints to POST telemetry to
+      GCS_ENDPOINT: "http://gcs-dashboard:5000/api/telemetry"
+      # Number of simulation ticks
+      SIM_TICKS: "${SIM_TICKS:-300}"
+      # Random seed for reproducibility
+      SIM_SEED: "${SIM_SEED:-42}"
+    command: >
+      python main.py
+        --no-viz
+        --ticks ${SIM_TICKS:-300}
+        --seed ${SIM_SEED:-42}
+        --export-json /app/logs/sim_results.json
+    depends_on:
+      gcs-dashboard:
+        condition: service_healthy
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # PX4 SITL Fleet (profile: sitl)
+  # Spawns 10 PX4 SITL instances inside a Gazebo world.
+  # Requires the px4io/px4-dev-simulation image (includes Gazebo + PX4 build).
+  #
+  # Port mapping:
+  #   14540-14549 : MAVSDK/MAVLink (one per UAV)
+  #   14550-14559 : QGroundControl GCS ports
+  # ----------------------------------------------------------------------------
+  px4-sitl:
+    image: px4io/px4-dev-simulation-focal:latest
+    container_name: uavx-px4-sitl
+    volumes:
+      # Mount SITL scripts and world file into the container
+      - ./phase1_sitl:/px4-scripts:ro
+    networks:
+      - uavx-net
+    ports:
+      # MAVSDK ports for UAVs 0-9
+      - "14540-14549:14540-14549/udp"
+      # QGC ports for UAVs 0-9
+      - "14550-14559:14550-14559/udp"
+    environment:
+      # PX4 GPS home position (Zurich Kloten area, matches scenario)
+      PX4_HOME_LAT: "47.397742"
+      PX4_HOME_LON: "8.545594"
+      PX4_HOME_ALT: "488.0"
+      # Disable Gazebo GUI in headless mode
+      HEADLESS: "1"
+      DISPLAY: "${DISPLAY:-}"
+    command: /bin/bash /px4-scripts/launch/spawn_fleet.sh /PX4-Autopilot disaster_zone
+    # Only run this service when --profile sitl is passed
+    profiles:
+      - sitl
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # NS-3 Communications Model (profile: comms)
+  # Runs the swarm_network.py simulation using NS-3 Python bindings
+  # (or the pure-Python fallback) and streams link-state data to GCS.
+  # ----------------------------------------------------------------------------
+  ns3-comms:
+    image: ubuntu:22.04
+    container_name: uavx-ns3-comms
+    volumes:
+      - ./phase2_comms:/ns3-work:ro
+    networks:
+      - uavx-net
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GCS_ENDPOINT: "http://gcs-dashboard:5000/api/link-states"
+    # Install minimal Python deps at runtime (image has no pip pre-installed)
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y --no-install-recommends python3 python3-pip -qq &&
+        pip3 install --quiet requests &&
+        python3 /ns3-work/ns3_models/swarm_network.py
+      "
+    depends_on:
+      gcs-dashboard:
+        condition: service_healthy
+    profiles:
+      - comms
+    restart: "no"
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  uavx-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+# ==============================================================================
+# Named Volumes
+# ==============================================================================
+volumes:
+  # GCS dashboard persistent data (SQLite DB, user sessions)
+  dashboard-data: {}
+  # Simulation log files (also bind-mounted above for host access)
+  logs: {}

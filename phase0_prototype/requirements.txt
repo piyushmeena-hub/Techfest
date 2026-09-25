@@ -1,0 +1,69 @@
+# ==============================================================================
+# UAV-X Phase 0 – Python Requirements
+# ==============================================================================
+# Phase 0 is designed as a ZERO hard-dependency prototype:
+#   All core simulation code (core/models.py, core/comm_network.py,
+#   core/mission_manager.py, core/acceptance_reporter.py) runs on
+#   Python 3.8+ standard library alone.
+#
+# The packages below are OPTIONAL – they enhance the experience but are
+# never imported without a graceful try/except fallback.
+#
+# Install all optional packages with:
+#   pip install -r requirements.txt
+#
+# Install only the bare minimum for headless / CI use:
+#   (no pip install needed – just `python main.py --no-viz`)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Optional – Enhanced Visualization
+# Used by visualizer/matplotlib_viz.py to render mission maps and charts.
+# Falls back to terminal_viz.py (ANSI text) if not installed.
+# ------------------------------------------------------------------------------
+matplotlib>=3.5.0
+numpy>=1.21.0
+
+# ------------------------------------------------------------------------------
+# Optional – Testing
+# Required to run:  pytest tests/ -v
+# ------------------------------------------------------------------------------
+pytest>=7.0.0
+pytest-cov>=3.0.0
+
+# ------------------------------------------------------------------------------
+# Optional – B-spline path smoothing (Phase 3 fast_planner_bridge)
+# Used by FastPlannerBridge.get_smoothed_path().
+# Falls back to moving-average smoother if not installed.
+# ------------------------------------------------------------------------------
+scipy>=1.7.0
+
+# ------------------------------------------------------------------------------
+# Optional – GCS Dashboard (Phase 4)
+# Required to run:  cd dashboard && python app.py
+# ------------------------------------------------------------------------------
+# flask>=2.0.0
+# requests>=2.27.0
+
+# ------------------------------------------------------------------------------
+# Optional – Phase 1 SITL Integration
+# Required to run:  python phase1_sitl/mavsdk_scripts/mission_controller.py
+# Install only when PX4 SITL or real hardware is available:
+#   pip install mavsdk>=1.4.0
+# ------------------------------------------------------------------------------
+# mavsdk>=1.4.0
+
+# ------------------------------------------------------------------------------
+# Optional – Phase 2 NS-3 Bindings
+# Install from the NS-3 PyPI mirror (experimental):
+#   pip install --index-url https://pypi.nsnam.org ns3
+# OR build from NS-3 source with --enable-python-bindings
+# ------------------------------------------------------------------------------
+# ns3>=3.41
+
+# ------------------------------------------------------------------------------
+# Optional – Phase 3 ROS2 Bridge
+# rclpy is distributed with ROS 2 – not installable via pip alone.
+# Source /opt/ros/humble/setup.bash before running planner_bridge.py
+# ------------------------------------------------------------------------------
+# rclpy  # installed with ROS 2 Humble

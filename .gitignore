@@ -1,0 +1,33 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+venv/
+env/
+ENV/
+.env
+
+# Large third-party cloned repos (managed via ./setup.sh)
+vendor/
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build & packaging
+build/
+dist/
+*.egg-info/
