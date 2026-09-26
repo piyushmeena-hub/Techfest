@@ -1722,7 +1722,25 @@ function initUIControls() {
         });
     }
 
-    // Keyboard ESC shortcut to close inspect panel & analytics drawer
+    // Toggle inspect panel via header button
+    const btnToggleInspect = document.getElementById("btn-toggle-inspect");
+    if (btnToggleInspect) {
+        btnToggleInspect.addEventListener("click", () => {
+            isInspectOpen = !isInspectOpen;
+            const pnl = document.getElementById("drone-inspect-panel");
+            if (pnl) {
+                if (isInspectOpen) {
+                    pnl.classList.remove("hidden");
+                    const drone = (latestTelemetry && latestTelemetry.drones || []).find(d => d.id === selectedDroneId) || (latestTelemetry && latestTelemetry.drones && latestTelemetry.drones[0]);
+                    if (drone) updateInspectPanel(drone);
+                } else {
+                    pnl.classList.add("hidden");
+                }
+            }
+        });
+    }
+
+    // Keyboard shortcuts: ESC to close, T or I to toggle avionics box
     window.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             isInspectOpen = false;
@@ -1730,6 +1748,18 @@ function initUIControls() {
             if (pnl) pnl.classList.add("hidden");
             const drawer = document.getElementById("analytics-drawer");
             if (drawer) drawer.classList.add("hidden");
+        } else if (e.key === "t" || e.key === "T" || e.key === "i" || e.key === "I") {
+            isInspectOpen = !isInspectOpen;
+            const pnl = document.getElementById("drone-inspect-panel");
+            if (pnl) {
+                if (isInspectOpen) {
+                    pnl.classList.remove("hidden");
+                    const drone = (latestTelemetry && latestTelemetry.drones || []).find(d => d.id === selectedDroneId) || (latestTelemetry && latestTelemetry.drones && latestTelemetry.drones[0]);
+                    if (drone) updateInspectPanel(drone);
+                } else {
+                    pnl.classList.add("hidden");
+                }
+            }
         }
     });
 
