@@ -15,6 +15,7 @@
 let socket = null;
 let isPaused = false;
 let selectedDroneId = "UAV_1";
+let isInspectOpen = false;
 let latestTelemetry = null;
 let activeCamMode = "orbit";
 let activeViewportMode = "split";
@@ -872,6 +873,7 @@ function updateAPFVectors(apfData) {
 // Select Active Drone for SLAM & Inspection
 function selectDrone(droneId) {
     selectedDroneId = droneId;
+    isInspectOpen = true;
     slamTrajectoryPoints = []; // reset trajectory trail for new drone
 
     // Inform server to direct LiDAR scanning to this drone
@@ -1224,7 +1226,7 @@ function updateHUD(telemetry) {
     });
 
     // Update Inspect Panel
-    if (selectedDroneId) {
+    if (isInspectOpen && selectedDroneId) {
         const selectedDrone = (telemetry.drones || []).find(d => d.id === selectedDroneId);
         if (selectedDrone) updateInspectPanel(selectedDrone);
     }
@@ -1235,7 +1237,7 @@ function updateHUD(telemetry) {
 
 function updateInspectPanel(d) {
     const pnl = document.getElementById("drone-inspect-panel");
-    if (!pnl) return;
+    if (!pnl || !isInspectOpen) return;
     pnl.classList.remove("hidden");
     const elId = document.getElementById("inspect-id");
     if (elId) elId.textContent = `${d.id} AVIONICS TELEMETRY`;
@@ -1712,11 +1714,24 @@ function initUIControls() {
     // Close inspect panel
     const btnCloseInspect = document.getElementById("btn-close-inspect");
     if (btnCloseInspect) {
-        btnCloseInspect.addEventListener("click", () => {
+        btnCloseInspect.addEventListener("click", (e) => {
+            e.stopPropagation();
+            isInspectOpen = false;
             const pnl = document.getElementById("drone-inspect-panel");
             if (pnl) pnl.classList.add("hidden");
         });
     }
+
+    // Keyboard ESC shortcut to close inspect panel & analytics drawer
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            isInspectOpen = false;
+            const pnl = document.getElementById("drone-inspect-panel");
+            if (pnl) pnl.classList.add("hidden");
+            const drawer = document.getElementById("analytics-drawer");
+            if (drawer) drawer.classList.add("hidden");
+        }
+    });
 
     // Export CSV
     const btnExport = document.getElementById("btn-export-csv");

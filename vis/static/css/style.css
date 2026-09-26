@@ -831,16 +831,31 @@ body {
 }
 
 .btn-close {
-    background: transparent;
-    border: none;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--text-muted);
     font-size: 18px;
     cursor: pointer;
     line-height: 1;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    z-index: 10;
 }
 
 .btn-close:hover {
-    color: #fff;
+    color: #ff4444;
+    background: rgba(255, 68, 68, 0.2);
+    border-color: rgba(255, 68, 68, 0.5);
+    transform: scale(1.1);
+}
+
+.btn-close:active {
+    transform: scale(0.95);
 }
 
 /* Primary Flight Display (PFD) Artificial Horizon */
