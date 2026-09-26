@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UAV-X: Resilient Multi-Hop Aerial Swarm Network & SLAM Autonomy Cockpit</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Three.js and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Chart.js for High-Precision Scientific Telemetry -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Dual-Viewport Split-Screen Canvas Container -->
+    <div id="viewports-wrapper" class="mode-split">
+        <!-- Viewport 1: External Theater Reality -->
+        <div id="viewport-theater" class="viewport-pane">
+            <div class="viewport-header-badge">
+                <span class="pulse-dot green"></span>
+                <span class="v-title">VIEWPORT 1: EXTERNAL THEATER (GROUND TRUTH REALITY)</span>
+                <span class="v-sub">OPTICAL 3D SENSING &bull; 8-UAV FLEET &bull; RF TUBES</span>
+            </div>
+            <div id="canvas-theater-container" class="canvas-holder"></div>
+        </div>
+
+        <!-- Viewport 2: Autonomous Drone SLAM Perception -->
+        <div id="viewport-slam" class="viewport-pane">
+            <div class="viewport-header-badge">
+                <span class="pulse-dot cyan"></span>
+                <span class="v-title">VIEWPORT 2: AUTONOMOUS SLAM PERCEPTION (COGNITIVE MODEL)</span>
+                <span class="v-sub" id="slam-tracking-label">3D LIDAR SWEEP &bull; OCTOMAP VOXELS &bull; APF VECTORS</span>
+            </div>
+            <div class="slam-stats-overlay">
+                <div class="slam-stat-item"><span class="lbl">FOCUS:</span> <span id="slam-drone-id" class="val text-cyan">UAV_1</span></div>
+                <div class="slam-stat-item"><span class="lbl">LIDAR PTS:</span> <span id="slam-pts-count" class="val text-neon-green">0</span></div>
+                <div class="slam-stat-item"><span class="lbl">OCCUPIED VOXELS:</span> <span id="slam-voxels-count" class="val text-neon-yellow">0</span></div>
+                <div class="slam-stat-item"><span class="lbl">SURVEY VOLUME:</span> <span id="slam-vol-count" class="val text-purple">0 m³</span></div>
+            </div>
+            <div id="canvas-slam-container" class="canvas-holder"></div>
+        </div>
+    </div>
+
+    <!-- Top Telemetry Header Bar -->
+    <header class="hud-header glass-panel">
+        <div class="hud-brand">
+            <div class="radar-ping"></div>
+            <div>
+                <h1>UAV-X AUTONOMY COCKPIT</h1>
+                <span class="subtitle">RESILIENT MULTI-HOP FANET &bull; 3D SLAM PERCEPTION</span>
+            </div>
+        </div>
+
+        <div class="hud-metrics">
+            <div class="metric-card">
+                <span class="metric-label">MISSION TIME</span>
+                <span class="metric-val" id="metric-time">00:00.0</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">PACKET DELIVERY (PDR)</span>
+                <span class="metric-val text-neon-green" id="metric-pdr">100.0%</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">AVG LATENCY</span>
+                <span class="metric-val text-cyan" id="metric-latency">8.5 ms</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">EKF CONVERGENCE</span>
+                <span class="metric-val text-neon-yellow" id="metric-ekf-err">0.08 m</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">DISASTER POIS</span>
+                <span class="metric-val text-purple" id="metric-pois">0 / 5</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">SURVEY RATE</span>
+                <span class="metric-val text-neon-green" id="metric-survey-rate">14,200 m²/m</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">MESH STATUS</span>
+                <span class="badge badge-active" id="badge-network">8 NODES MESH</span>
+            </div>
+        </div>
+
+        <div class="hud-controls">
+            <!-- Investor Demo Button -->
+            <button id="btn-investor" class="btn btn-investor">★ INVESTOR DEMO</button>
+            <!-- Audio Synthesis Toggle -->
+            <button id="btn-audio" class="btn btn-outline text-cyan">🔇 AUDIO</button>
+            <!-- Snapshot Capture -->
+            <button id="btn-snapshot" class="btn btn-outline text-neon-green">📷 SNAP</button>
+            <!-- Analytics Dashboard Toggle -->
+            <button id="btn-toggle-analytics" class="btn btn-outline text-purple">ANALYTICS</button>
+            <!-- Viewport Mode Switcher -->
+            <div class="view-mode-group">
+                <button class="btn btn-sm btn-mode active" data-mode="split">SPLIT 50/50</button>
+                <button class="btn btn-sm btn-mode" data-mode="theater">THEATER</button>
+                <button class="btn btn-sm btn-mode" data-mode="slam">SLAM</button>
+                <button class="btn btn-sm btn-mode" data-mode="pip">PiP</button>
+            </div>
+            <!-- Simulation Controls -->
+            <button id="btn-pause" class="btn btn-outline">PAUSE</button>
+            <button id="btn-reset" class="btn btn-outline">RESET</button>
+            <button id="btn-export-csv" class="btn btn-outline text-neon-yellow">EXPORT CSV</button>
+            <select id="select-speed" class="select-control">
+                <option value="1.0">1.0x Real-Time</option>
+                <option value="2.0">2.0x Fast</option>
+                <option value="5.0">5.0x Turbo</option>
+            </select>
+        </div>
+    </header>
+
+    <!-- FLIR Thermal HUD Overlay -->
+    <div id="flir-overlay" class="flir-overlay hidden">
+        <div class="flir-scanlines"></div>
+        <div class="flir-hud-tag">FLIR THERMAL IR &bull; WHITE-HOT SENSOR</div>
+    </div>
+
+    <!-- Cinematic Lower-Third Presentation Bar (Non-Obtrusive Broadcast Design) -->
+    <div id="investor-lower-bar" class="investor-lower-bar glass-panel hidden">
+        <div class="investor-bar-left">
+            <div class="investor-badge-pill">★ EXECUTIVE DEMO ★</div>
+            <div class="investor-phase-info">
+                <h3 id="investor-phase-title">PHASE 1: HETEROGENEOUS SWARM DEPLOYMENT</h3>
+                <p id="investor-phase-desc">8-UAV autonomous fleet executes coordinated takeoff and altitude corridor separation.</p>
+            </div>
+        </div>
+        <div class="investor-bar-kpis">
+            <div class="kpi-mini">
+                <span class="lbl">SURVEY COVERAGE</span>
+                <span class="val text-neon-green" id="kpi-survey-rate">14,200 m²/min</span>
+            </div>
+            <div class="kpi-mini">
+                <span class="lbl">LINK UPTIME</span>
+                <span class="val text-cyan">99.98% (Zero Drop)</span>
+            </div>
+            <div class="kpi-mini">
+                <span class="lbl">CONSENSUS</span>
+                <span class="val text-neon-yellow">&lt; 8.5 ms (CBBA)</span>
+            </div>
+            <div class="kpi-mini">
+                <span class="lbl">TCO SAVING</span>
+                <span class="val text-purple">-78% vs Piloted</span>
+            </div>
+        </div>
+        <div class="investor-bar-right">
+            <button id="btn-exit-investor" class="btn btn-danger btn-sm">EXIT DEMO</button>
+        </div>
+    </div>
+
+    <!-- Click-to-Inspect Telemetry Card with PFD Flight Instrument -->
+    <div id="drone-inspect-panel" class="glass-panel inspect-panel hidden">
+        <div class="panel-header">
+            <h3 id="inspect-id">UAV-1 TELEMETRY</h3>
+            <button id="btn-close-inspect" class="btn-close">&times;</button>
+        </div>
+        <!-- Primary Flight Display (PFD) Artificial Horizon -->
+        <div class="pfd-wrapper">
+            <canvas id="pfd-canvas" width="280" height="95"></canvas>
+        </div>
+        <div class="inspect-grid">
+            <div class="inspect-stat"><span class="lbl">ROLE:</span> <span id="inspect-role" class="val text-cyan">SURVEY</span></div>
+            <div class="inspect-stat"><span class="lbl">MODE:</span> <span id="inspect-mode" class="val text-neon-green">SURVEYING</span></div>
+            <div class="inspect-stat"><span class="lbl">TRUE POS:</span> <span id="inspect-true-pos" class="val">0, 0, 0</span></div>
+            <div class="inspect-stat"><span class="lbl">EKF EST POS:</span> <span id="inspect-est-pos" class="val text-neon-yellow">0, 0, 0</span></div>
+            <div class="inspect-stat"><span class="lbl">EKF ERROR:</span> <span id="inspect-ekf-err" class="val text-neon-green">0.08 m</span></div>
+            <div class="inspect-stat"><span class="lbl">AIRSPEED:</span> <span id="inspect-speed" class="val">4.5 m/s</span></div>
+            <div class="inspect-stat"><span class="lbl">BATTERY:</span> <span id="inspect-battery" class="val">98%</span></div>
+            <div class="inspect-stat"><span class="lbl">ATTITUDE:</span> <span id="inspect-attitude" class="val text-cyan">R:0° P:0° Y:0°</span></div>
+            <div class="inspect-stat"><span class="lbl">APF NET FORCE:</span> <span id="inspect-apf-net" class="val text-neon-yellow">0.0 N</span></div>
+            <div class="inspect-stat"><span class="lbl">ASSIGNED POI:</span> <span id="inspect-target" class="val">POI_SURVIVORS</span></div>
+        </div>
+    </div>
+
+    <!-- Scientific Analytical Graphing Dashboard Drawer -->
+    <div id="analytics-drawer" class="analytics-drawer glass-panel hidden">
+        <div class="panel-header">
+            <div class="analytics-title">
+                <span class="pulse-dot purple"></span>
+                <h3>SCIENTIFIC TELEMETRY & MULTI-HOP ANALYTICS DASHBOARD</h3>
+            </div>
+            <button id="btn-close-analytics" class="btn-close">&times;</button>
+        </div>
+        <div class="analytics-grid">
+            <!-- Chart 1: EKF Convergence -->
+            <div class="chart-card glass-card">
+                <div class="chart-header">
+                    <h4>9-STATE EKF STATE ESTIMATION ERROR (m)</h4>
+                    <span class="badge text-neon-green" id="chart-ekf-badge">&lt; 0.12m CONVERGED</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-ekf"></canvas>
+                </div>
+            </div>
+            <!-- Chart 2: PDR & Throughput -->
+            <div class="chart-card glass-card">
+                <div class="chart-header">
+                    <h4>FANET PACKET DELIVERY RATIO &amp; THROUGHPUT</h4>
+                    <span class="badge text-cyan" id="chart-pdr-badge">99.8% PDR</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-pdr"></canvas>
+                </div>
+            </div>
+            <!-- Chart 3: RF Link SNR vs Distance -->
+            <div class="chart-card glass-card">
+                <div class="chart-header">
+                    <h4>RF LINK SNR (dB) vs HOP DISTANCE (m)</h4>
+                    <span class="badge text-neon-yellow">LOG-DISTANCE SHADOWING</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-rf"></canvas>
+                </div>
+            </div>
+            <!-- Chart 4: Fleet Battery Depletion -->
+            <div class="chart-card glass-card">
+                <div class="chart-header">
+                    <h4>FLEET BATTERY DISCHARGE &amp; ENDURANCE</h4>
+                    <span class="badge text-neon-orange" id="chart-battery-badge">8 UNITS ACTIVE</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-battery"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Left Overlay: Swarm Fleet Dynamic Telemetry Panel -->
+    <aside class="hud-left glass-panel">
+        <div class="panel-header">
+            <h3>ACTIVE UAV FLEET</h3>
+            <span class="badge text-neon-green" id="fleet-count">8 UNITS</span>
+        </div>
+        <div id="fleet-list" class="fleet-scroll-container">
+            <!-- Dynamic drone items injected here -->
+        </div>
+    </aside>
+
+    <!-- Right Overlay: Dynamic Multi-Hop Routing Matrix -->
+    <aside class="hud-right glass-panel">
+        <div class="panel-header">
+            <h3>FANET ROUTING MATRIX</h3>
+            <span class="badge text-cyan">DUAL-BAND ETX</span>
+        </div>
+        
+        <div class="sub-section">
+            <h4>ACTIVE MULTI-HOP ROUTES TO GCS</h4>
+            <div id="routes-list" class="routes-container">
+                <!-- Dynamic route paths injected here -->
+            </div>
+        </div>
+
+        <div class="sub-section">
+            <h4>RF MESH LINKS (2.4GHz / 915MHz LoRa)</h4>
+            <div id="links-list" class="links-container">
+                <!-- Dynamic links with SNR injected here -->
+            </div>
+        </div>
+    </aside>
+
+    <!-- Bottom Overlay: Disaster Points of Interest (PoIs) Progress -->
+    <footer class="hud-bottom glass-panel">
+        <div class="panel-header-inline">
+            <h3>DISASTER SURVEY SITES</h3>
+            <div class="cam-buttons">
+                <button class="btn btn-sm btn-cam active" data-cam="orbit">ORBIT</button>
+                <button class="btn btn-sm btn-cam" data-cam="top">TACTICAL TOP</button>
+                <button class="btn btn-sm btn-cam" data-cam="fpv">FPV CHASE</button>
+                <button class="btn btn-sm btn-cam" data-cam="gcs">GCS MAST</button>
+                <button class="btn btn-sm btn-cam" data-cam="flir">FLIR THERMAL</button>
+            </div>
+        </div>
+        <div id="poi-list" class="poi-grid">
+            <!-- Dynamic PoI inspection cards injected here -->
+        </div>
+    </footer>
+
+    <script src="/static/js/cockpit.js"></script>
+</body>
+</html>

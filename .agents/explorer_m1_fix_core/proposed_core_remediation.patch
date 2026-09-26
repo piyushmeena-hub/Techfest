@@ -1,0 +1,20 @@
+--- a/sim/core.py
++++ b/sim/core.py
+@@ -13,4 +13,5 @@
+ import json
++import math
+ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+ import numpy as np
+ 
+@@ -181,7 +182,10 @@
+                 if -8.0 <= dz <= -0.5 and d_xy <= (abs(dz) * 0.4663 + 1.0):
+-                    lateral_dir = delta[:2] / max(d_xy, 1e-3)
++                    if d_xy > 1e-3:
++                        lateral_dir = delta[:2] / d_xy
++                    else:
++                        # Deterministic non-zero lateral nudge to break concentric column lock
++                        lateral_dir = np.array([1.0, 0.0], dtype=np.float64)
+                     mag_dw = 35.0 * math.exp(-(d_xy ** 2) / 8.0)
+                     f_downwash[0] += lateral_dir[0] * mag_dw
+                     f_downwash[1] += lateral_dir[1] * mag_dw
+                     f_downwash[2] -= 4.0 * math.exp(-(d_xy ** 2) / 2.0)

@@ -1,0 +1,1932 @@
+/**
+ * vis/static/js/cockpit.js
+ * Dual-Viewport 3D WebGL Cockpit & Autonomous SLAM Perception Engine.
+ * 
+ * Viewport 1 (Theater View): Photorealistic defense/disaster simulation with 8-UAV fleet,
+ * building rubble, animated rotors, downwash dust, and dynamic multi-hop RF tubes.
+ * 
+ * Viewport 2 (SLAM Perception): Onboard drone cognitive model with real-time 3D LiDAR
+ * point clouds, 3D occupancy voxel grid (OctoMap), and Khatib APF guidance vectors.
+ * 
+ * Includes Chart.js scientific telemetry dashboard and automated investor presentation mode.
+ */
+
+// Global State
+let socket = null;
+let isPaused = false;
+let selectedDroneId = "UAV_1";
+let latestTelemetry = null;
+let activeCamMode = "orbit";
+let activeViewportMode = "split";
+let isInvestorMode = false;
+let investorStartTime = 0;
+let lastChartUpdate = 0;
+
+// Viewport 1: Theater Reality
+let sceneTheater, cameraTheater, rendererTheater, controlsTheater;
+let droneMeshes = new Map();
+let rotorMeshes = [];
+let strobeObjects = [];
+let obstacleMeshes = new Map();
+let poiMeshes = new Map();
+let linkMeshes = new Map();
+let packetMeshes = [];
+let smokeParticles = null;
+let washParticles = null;
+let raycasterTheater = new THREE.Raycaster();
+let mouseTheater = new THREE.Vector2();
+
+// Viewport 2: Autonomous SLAM Perception
+let sceneSLAM, cameraSLAM, rendererSLAM, controlsSLAM;
+let slamDroneMesh = null;
+let lidarPointsMesh = null;
+let voxelMeshGroup = null;
+let apfArrowAtt = null;
+let apfArrowRep = null;
+let apfArrowNet = null;
+let lidarSweepLine = null;
+let slamTrajectoryLine = null;
+let slamTrajectoryPoints = [];
+let maxTrajectoryPoints = 120;
+
+// Audio & Mission Metrics
+let audioContext = null;
+let isAudioMuted = true;
+let lastSurveyedCount = 0;
+
+// Scientific Charts (Chart.js)
+let chartEKF = null;
+let chartPDR = null;
+let chartRF = null;
+let chartBattery = null;
+let chartHistoryTime = [];
+let chartHistoryEKF = [];
+let chartHistoryPDR = [];
+let chartHistoryThroughput = [];
+
+// Initialize on DOM ready
+document.addEventListener("DOMContentLoaded", () => {
+    try { initTheaterViewport(); } catch (e) { console.error("initTheaterViewport error:", e); }
+    try { initSLAMViewport(); } catch (e) { console.error("initSLAMViewport error:", e); }
+    try { connectWebSocket(); } catch (e) { console.error("connectWebSocket error:", e); }
+    try { initUIControls(); } catch (e) { console.error("initUIControls error:", e); }
+    try { initScientificCharts(); } catch (e) { console.error("initScientificCharts error:", e); }
+});
+
+// ============================================================================
+// Viewport 1: External Theater Reality
+// ============================================================================
+
+function initTheaterViewport() {
+    const container = document.getElementById("canvas-theater-container");
+    const width = container.clientWidth || window.innerWidth / 2;
+    const height = container.clientHeight || window.innerHeight;
+
+    // 1. Scene
+    sceneTheater = new THREE.Scene();
+    sceneTheater.background = new THREE.Color(0x060a12);
+    sceneTheater.fog = new THREE.FogExp2(0x060a12, 0.0016);
+
+    // 2. Camera
+    cameraTheater = new THREE.PerspectiveCamera(50, width / height, 1, 2500);
+    cameraTheater.position.set(0, -290, 170);
+    cameraTheater.up.set(0, 0, 1);
+
+    // 3. Renderer
+    rendererTheater = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    rendererTheater.setSize(width, height);
+    rendererTheater.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    rendererTheater.shadowMap.enabled = true;
+    rendererTheater.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(rendererTheater.domElement);
+
+    // 4. Controls
+    if (typeof THREE.OrbitControls !== "undefined") {
+        controlsTheater = new THREE.OrbitControls(cameraTheater, rendererTheater.domElement);
+        controlsTheater.enableDamping = true;
+        controlsTheater.dampingFactor = 0.05;
+        controlsTheater.maxPolarAngle = Math.PI / 2 - 0.02;
+        controlsTheater.target.set(0, 0, 25);
+    }
+
+    // 5. Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    sceneTheater.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0x00e5ff, 0.75);
+    dirLight.position.set(130, -160, 220);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    sceneTheater.add(dirLight);
+
+    const gcsBeaconLight = new THREE.PointLight(0xff0055, 2.5, 120);
+    gcsBeaconLight.position.set(0, -150, 15);
+    sceneTheater.add(gcsBeaconLight);
+
+    // 6. Terrain Grid & Coordinate Floor
+    createTheaterTerrain();
+
+    // 7. GCS Base Station Mesh
+    createGCSBase(0, -150, 0);
+
+    // 8. Particle Systems
+    initParticleSystems();
+
+    // 9. Interactive Raycasting Click-to-Inspect
+    rendererTheater.domElement.addEventListener("click", onTheaterCanvasClick);
+}
+
+function createTheaterTerrain() {
+    // 500x500m Disaster Theater Floor
+    const gridHelper = new THREE.GridHelper(500, 50, 0x00e5ff, 0x1e293b);
+    gridHelper.rotation.x = Math.PI / 2;
+    gridHelper.position.set(0, 0, 0);
+    sceneTheater.add(gridHelper);
+
+    // Outer Boundary Perimeter Box
+    const boundaryGeo = new THREE.BoxGeometry(400, 400, 100);
+    const boundaryEdges = new THREE.EdgesGeometry(boundaryGeo);
+    const boundaryMat = new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.25 });
+    const boundaryLine = new THREE.LineSegments(boundaryEdges, boundaryMat);
+    boundaryLine.position.set(0, 0, 50);
+    sceneTheater.add(boundaryLine);
+}
+
+function createGCSBase(x, y, z) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+
+    // Ground bunker
+    const bunkerGeo = new THREE.CylinderGeometry(8, 11, 4, 8);
+    const bunkerMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.2 });
+    const bunker = new THREE.Mesh(bunkerGeo, bunkerMat);
+    bunker.rotation.x = Math.PI / 2;
+    bunker.position.z = 2;
+    group.add(bunker);
+
+    // Comms Tower
+    const towerGeo = new THREE.CylinderGeometry(0.6, 1.2, 18, 6);
+    const towerMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.9, roughness: 0.1 });
+    const tower = new THREE.Mesh(towerGeo, towerMat);
+    tower.rotation.x = Math.PI / 2;
+    tower.position.z = 11;
+    group.add(tower);
+
+    // Satellite Dish
+    const dishGeo = new THREE.SphereGeometry(3.5, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    const dishMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, wireframe: true });
+    const dish = new THREE.Mesh(dishGeo, dishMat);
+    dish.rotation.x = -Math.PI / 3;
+    dish.position.z = 20;
+    group.add(dish);
+
+    // Red Pulsing Beacon
+    const beaconGeo = new THREE.SphereGeometry(1.0, 8, 8);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+    const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+    beacon.position.z = 21;
+    group.add(beacon);
+
+    sceneTheater.add(group);
+}
+
+function initParticleSystems() {
+    // 1. Disaster Smoke & Fire Embers at Disaster Sites
+    const smokeCount = 250;
+    const smokeGeo = new THREE.BufferGeometry();
+    const smokePositions = new Float32Array(smokeCount * 3);
+    const smokeSpeeds = new Float32Array(smokeCount);
+
+    const origins = [
+        new THREE.Vector3(-100, 35, 2),  // POI_COLLAPSE
+        new THREE.Vector3(10, 110, 2),   // POI_HAZARD
+        new THREE.Vector3(-55, 115, 2),  // POI_BRIDGE
+    ];
+
+    for (let i = 0; i < smokeCount; i++) {
+        const origin = origins[i % origins.length];
+        smokePositions[i * 3] = origin.x + (Math.random() - 0.5) * 14;
+        smokePositions[i * 3 + 1] = origin.y + (Math.random() - 0.5) * 14;
+        smokePositions[i * 3 + 2] = origin.z + Math.random() * 40;
+        smokeSpeeds[i] = 0.25 + Math.random() * 0.45;
+    }
+    smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePositions, 3));
+    const smokeMat = new THREE.PointsMaterial({
+        color: 0xff6600,
+        size: 3.2,
+        transparent: true,
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+    });
+    smokeParticles = new THREE.Points(smokeGeo, smokeMat);
+    smokeParticles.speeds = smokeSpeeds;
+    smokeParticles.origins = origins;
+    sceneTheater.add(smokeParticles);
+
+    // 2. Ground Wash Dust Rings for Low-Flying Drones
+    const washCount = 150;
+    const washGeo = new THREE.BufferGeometry();
+    const washPositions = new Float32Array(washCount * 3);
+    washGeo.setAttribute('position', new THREE.BufferAttribute(washPositions, 3));
+    const washMat = new THREE.PointsMaterial({
+        color: 0x00e5ff,
+        size: 1.8,
+        transparent: true,
+        opacity: 0.5,
+    });
+    washParticles = new THREE.Points(washGeo, washMat);
+    sceneTheater.add(washParticles);
+}
+
+function createQuadcopterMesh(role) {
+    const droneGroup = new THREE.Group();
+    const isRelay = role === "RELAY";
+    const primaryColor = isRelay ? 0xffd600 : 0x00e5ff;
+    const accentColor = isRelay ? 0xff9100 : 0x00ff66;
+
+    // 1. Central Avionics Fuselage (Sculpted Carbon-Fiber Monocoque)
+    const bodyGeo = new THREE.BoxGeometry(1.6, 1.2, 0.45);
+    const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x0c121e,
+        metalness: 0.85,
+        roughness: 0.25,
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    droneGroup.add(body);
+
+    // Avionics Top Cowl & Role Identifier Dome
+    const cowlGeo = new THREE.CylinderGeometry(0.35, 0.48, 0.22, 12);
+    const cowlMat = new THREE.MeshStandardMaterial({
+        color: primaryColor,
+        metalness: 0.6,
+        roughness: 0.2,
+    });
+    const cowl = new THREE.Mesh(cowlGeo, cowlMat);
+    cowl.position.z = 0.32;
+    droneGroup.add(cowl);
+
+    // Dual GNSS Antenna Pucks
+    const puckGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.08, 10);
+    const puckMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.9 });
+    const puck1 = new THREE.Mesh(puckGeo, puckMat);
+    puck1.position.set(0.35, 0.2, 0.28);
+    droneGroup.add(puck1);
+    const puck2 = new THREE.Mesh(puckGeo, puckMat);
+    puck2.position.set(-0.35, 0.2, 0.28);
+    droneGroup.add(puck2);
+
+    // 2. Dual Landing Gear Skids (Aerospace Runner Skids)
+    const skidGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.0, 8);
+    const skidMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85, roughness: 0.3 });
+    const strutGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.45, 6);
+
+    [-0.65, 0.65].forEach(x => {
+        // Horizontal skid rail along Y axis
+        const skid = new THREE.Mesh(skidGeo, skidMat);
+        skid.rotation.x = Math.PI / 2;
+        skid.position.set(x, 0, -0.42);
+        droneGroup.add(skid);
+
+        // Front strut
+        const strutF = new THREE.Mesh(strutGeo, skidMat);
+        strutF.position.set(x, 0.55, -0.22);
+        droneGroup.add(strutF);
+
+        // Rear strut
+        const strutR = new THREE.Mesh(strutGeo, skidMat);
+        strutR.position.set(x, -0.55, -0.22);
+        droneGroup.add(strutR);
+    });
+
+    // 3. Diagonal Carbon Fiber Boom Arms
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.95, roughness: 0.1 });
+    const armLength = 2.6;
+    const armGeo = new THREE.CylinderGeometry(0.07, 0.07, armLength, 8);
+
+    const arm1 = new THREE.Mesh(armGeo, armMat);
+    arm1.rotation.z = Math.PI / 4;
+    droneGroup.add(arm1);
+
+    const arm2 = new THREE.Mesh(armGeo, armMat);
+    arm2.rotation.z = -Math.PI / 4;
+    droneGroup.add(arm2);
+
+    // 4. Motors, Propellers, and Motion-Blurred Spinning Rotor Discs
+    const motorGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.35, 12);
+    const motorMat = new THREE.MeshStandardMaterial({ color: 0x090d16, metalness: 0.9 });
+    const bladeGeo = new THREE.BoxGeometry(1.25, 0.12, 0.02);
+    const bladeMat = new THREE.MeshBasicMaterial({ color: primaryColor, transparent: true, opacity: 0.9 });
+
+    // Translucent blurred rotor disc
+    const blurGeo = new THREE.RingGeometry(0.15, 0.72, 24);
+    const blurMat = new THREE.MeshBasicMaterial({
+        color: primaryColor,
+        transparent: true,
+        opacity: 0.28,
+        side: THREE.DoubleSide
+    });
+
+    const armDist = 0.92;
+    const motorPositions = [
+        [armDist, armDist, 0.22],
+        [-armDist, armDist, 0.22],
+        [-armDist, -armDist, 0.22],
+        [armDist, -armDist, 0.22],
+    ];
+
+    droneGroup.rotors = [];
+    motorPositions.forEach((pos) => {
+        const motor = new THREE.Mesh(motorGeo, motorMat);
+        motor.position.set(pos[0], pos[1], pos[2]);
+        droneGroup.add(motor);
+
+        const blade = new THREE.Mesh(bladeGeo, bladeMat);
+        blade.position.set(pos[0], pos[1], pos[2] + 0.20);
+        droneGroup.add(blade);
+        droneGroup.rotors.push(blade);
+        rotorMeshes.push(blade);
+
+        // Blurred spinning disc
+        const blurDisc = new THREE.Mesh(blurGeo, blurMat);
+        blurDisc.position.set(pos[0], pos[1], pos[2] + 0.20);
+        droneGroup.add(blurDisc);
+        droneGroup.rotors.push(blurDisc);
+        rotorMeshes.push(blurDisc);
+    });
+
+    // 5. Military / FAA Navigation Strobes & Beacons
+    droneGroup.strobes = [];
+    const strobeGeo = new THREE.SphereGeometry(0.08, 8, 8);
+
+    // Port (Left) - Red Strobe
+    const portMat = new THREE.MeshBasicMaterial({ color: 0xff1744, transparent: true, opacity: 1.0 });
+    const portStrobe = new THREE.Mesh(strobeGeo, portMat);
+    portStrobe.position.set(-armDist - 0.25, 0, 0.15);
+    portStrobe.strobeType = "port";
+    droneGroup.add(portStrobe);
+    droneGroup.strobes.push(portStrobe);
+    strobeObjects.push(portStrobe);
+
+    // Starboard (Right) - Green Strobe
+    const stbdMat = new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 1.0 });
+    const stbdStrobe = new THREE.Mesh(strobeGeo, stbdMat);
+    stbdStrobe.position.set(armDist + 0.25, 0, 0.15);
+    stbdStrobe.strobeType = "starboard";
+    droneGroup.add(stbdStrobe);
+    droneGroup.strobes.push(stbdStrobe);
+    strobeObjects.push(stbdStrobe);
+
+    // Tail White Anti-Collision Strobe
+    const tailMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
+    const tailStrobe = new THREE.Mesh(strobeGeo, tailMat);
+    tailStrobe.position.set(0, -armDist - 0.25, 0.15);
+    tailStrobe.strobeType = "beacon";
+    droneGroup.add(tailStrobe);
+    droneGroup.strobes.push(tailStrobe);
+    strobeObjects.push(tailStrobe);
+
+    // Forward Searchlight / FLIR Pod
+    const flirGeo = new THREE.SphereGeometry(0.24, 10, 8);
+    const flirMat = new THREE.MeshStandardMaterial({ color: 0x050810, metalness: 0.9 });
+    const flir = new THREE.Mesh(flirGeo, flirMat);
+    flir.position.set(0, 0.72, -0.15);
+    droneGroup.add(flir);
+
+    // 6. Downward Scanning Laser Footprint Cone
+    const laserConeGeo = new THREE.ConeGeometry(2.5, 12.0, 16, 1, true);
+    const laserConeMat = new THREE.MeshBasicMaterial({
+        color: primaryColor,
+        transparent: true,
+        opacity: 0.10,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    const laserCone = new THREE.Mesh(laserConeGeo, laserConeMat);
+    laserCone.rotation.x = Math.PI; // point downward
+    laserCone.position.set(0, 0, -6.0);
+    droneGroup.add(laserCone);
+
+    return droneGroup;
+}
+
+function onTheaterCanvasClick(event) {
+    const rect = rendererTheater.domElement.getBoundingClientRect();
+    mouseTheater.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouseTheater.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycasterTheater.setFromCamera(mouseTheater, cameraTheater);
+
+    const interactiveObjects = [];
+    droneMeshes.forEach((mesh, id) => {
+        mesh.traverse(child => {
+            if (child.isMesh) {
+                child.droneId = id;
+                interactiveObjects.push(child);
+            }
+        });
+    });
+
+    const intersects = raycasterTheater.intersectObjects(interactiveObjects);
+    if (intersects.length > 0) {
+        const hit = intersects[0].object;
+        if (hit.droneId) {
+            selectDrone(hit.droneId);
+        }
+    }
+}
+
+// ============================================================================
+// Viewport 2: Autonomous Drone SLAM Perception
+// ============================================================================
+
+function initSLAMViewport() {
+    const container = document.getElementById("canvas-slam-container");
+    const width = container.clientWidth || window.innerWidth / 2;
+    const height = container.clientHeight || window.innerHeight;
+
+    // 1. Scene
+    sceneSLAM = new THREE.Scene();
+    sceneSLAM.background = new THREE.Color(0x02050b);
+
+    // 2. Camera (Locked to Autonomous Drone Perception)
+    cameraSLAM = new THREE.PerspectiveCamera(55, width / height, 0.5, 1200);
+    cameraSLAM.position.set(0, -60, 45);
+    cameraSLAM.up.set(0, 0, 1);
+
+    // 3. Renderer
+    rendererSLAM = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    rendererSLAM.setSize(width, height);
+    rendererSLAM.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(rendererSLAM.domElement);
+
+    // 4. Controls
+    if (typeof THREE.OrbitControls !== "undefined") {
+        controlsSLAM = new THREE.OrbitControls(cameraSLAM, rendererSLAM.domElement);
+        controlsSLAM.enableDamping = true;
+        controlsSLAM.dampingFactor = 0.08;
+        controlsSLAM.maxPolarAngle = Math.PI / 2 - 0.02;
+        controlsSLAM.target.set(0, 0, 15);
+    }
+
+    // 5. Tactical SLAM Grid & Compass Rings
+    const grid = new THREE.GridHelper(300, 30, 0x00e5ff, 0x0f2238);
+    grid.rotation.x = Math.PI / 2;
+    sceneSLAM.add(grid);
+
+    // Range Radar Rings
+    for (let r of [30, 60, 100, 150]) {
+        const ringGeo = new THREE.RingGeometry(r - 0.3, r, 64);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.15, side: THREE.DoubleSide });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        sceneSLAM.add(ring);
+    }
+
+    // 6. Focused Drone Mesh (Avionics Hull in SLAM View)
+    slamDroneMesh = createQuadcopterMesh("SURVEY");
+    sceneSLAM.add(slamDroneMesh);
+
+    // 7. 3D LiDAR Point Cloud Buffer
+    const maxLidarPts = 1000;
+    const lidarGeo = new THREE.BufferGeometry();
+    const lidarPositions = new Float32Array(maxLidarPts * 3);
+    const lidarColors = new Float32Array(maxLidarPts * 3);
+    lidarGeo.setAttribute('position', new THREE.BufferAttribute(lidarPositions, 3));
+    lidarGeo.setAttribute('color', new THREE.BufferAttribute(lidarColors, 3));
+
+    const lidarMat = new THREE.PointsMaterial({
+        size: 3.5,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9,
+    });
+    lidarPointsMesh = new THREE.Points(lidarGeo, lidarMat);
+    sceneSLAM.add(lidarPointsMesh);
+
+    // 8. 3D Occupancy Voxel Mesh Group
+    voxelMeshGroup = new THREE.Group();
+    sceneSLAM.add(voxelMeshGroup);
+
+    // 9. Khatib APF Guidance Vector 3D Arrows
+    const dummyDir = new THREE.Vector3(1, 0, 0);
+    const origin = new THREE.Vector3(0, 0, 0);
+    // Green arrow: Attractive force to target PoI
+    apfArrowAtt = new THREE.ArrowHelper(dummyDir, origin, 8, 0x00ff66, 2, 1.2);
+    // Red arrow: Repulsive obstacle force
+    apfArrowRep = new THREE.ArrowHelper(dummyDir, origin, 8, 0xff1744, 2, 1.2);
+    // Cyan arrow: Net commanded acceleration vector
+    apfArrowNet = new THREE.ArrowHelper(dummyDir, origin, 12, 0x00e5ff, 2.5, 1.4);
+    sceneSLAM.add(apfArrowAtt);
+    sceneSLAM.add(apfArrowRep);
+    sceneSLAM.add(apfArrowNet);
+
+    // 10. Executed Trajectory Trail
+    const trajGeo = new THREE.BufferGeometry();
+    const trajMat = new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.85, linewidth: 2 });
+    slamTrajectoryLine = new THREE.Line(trajGeo, trajMat);
+    sceneSLAM.add(slamTrajectoryLine);
+
+    // 11. Rotating 360° LiDAR Sweep Beam
+    const sweepGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(65, 0, 0)
+    ]);
+    const sweepMat = new THREE.LineBasicMaterial({
+        color: 0x00ff66,
+        transparent: true,
+        opacity: 0.7,
+        linewidth: 2
+    });
+    lidarSweepLine = new THREE.Line(sweepGeo, sweepMat);
+    sceneSLAM.add(lidarSweepLine);
+}
+
+// ============================================================================
+// Data Updates & State Sync
+// ============================================================================
+
+function updateDrones(dronesData) {
+    const activeIds = new Set();
+
+    dronesData.forEach(drone => {
+        activeIds.add(drone.id);
+        let mesh = droneMeshes.get(drone.id);
+
+        if (!mesh) {
+            mesh = createQuadcopterMesh(drone.role);
+            sceneTheater.add(mesh);
+            droneMeshes.set(drone.id, mesh);
+        }
+
+        mesh.position.set(drone.position[0], drone.position[1], drone.position[2]);
+        if (drone.attitude) {
+            mesh.rotation.set(drone.attitude[0], drone.attitude[1], drone.attitude[2]);
+        }
+
+        // Sync focused drone in SLAM Viewport
+        if (drone.id === selectedDroneId && slamDroneMesh) {
+            slamDroneMesh.position.copy(mesh.position);
+            slamDroneMesh.rotation.copy(mesh.rotation);
+
+            // Record trajectory point
+            slamTrajectoryPoints.push(mesh.position.clone());
+            if (slamTrajectoryPoints.length > maxTrajectoryPoints) {
+                slamTrajectoryPoints.shift();
+            }
+            if (slamTrajectoryLine) {
+                slamTrajectoryLine.geometry.setFromPoints(slamTrajectoryPoints);
+            }
+        }
+    });
+
+    // Remove defunct drones
+    for (const [id, mesh] of droneMeshes.entries()) {
+        if (!activeIds.has(id)) {
+            sceneTheater.remove(mesh);
+            droneMeshes.delete(id);
+        }
+    }
+}
+
+function updateObstacles(obstaclesData) {
+    if (!obstaclesData || obstacleMeshes.size > 0) return;
+
+    obstaclesData.forEach(obs => {
+        const min = obs.min_pt;
+        const max = obs.max_pt;
+        const sizeX = max[0] - min[0];
+        const sizeY = max[1] - min[1];
+        const sizeZ = max[2] - min[2];
+        const centerX = min[0] + sizeX / 2;
+        const centerY = min[1] + sizeY / 2;
+        const centerZ = min[2] + sizeZ / 2;
+
+        const boxGeo = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
+        const boxMat = new THREE.MeshStandardMaterial({
+            color: 0x1e293b,
+            metalness: 0.5,
+            roughness: 0.7,
+        });
+        const building = new THREE.Mesh(boxGeo, boxMat);
+        building.position.set(centerX, centerY, centerZ);
+        building.castShadow = true;
+        building.receiveShadow = true;
+
+        // Glowing Wireframe Edge Highlights
+        const edgeGeo = new THREE.EdgesGeometry(boxGeo);
+        const edgeMat = new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.4 });
+        const wire = new THREE.LineSegments(edgeGeo, edgeMat);
+        building.add(wire);
+
+        sceneTheater.add(building);
+        obstacleMeshes.set(obs.id, building);
+    });
+}
+
+function updatePoIs(poisData) {
+    poisData.forEach(poi => {
+        let group = poiMeshes.get(poi.id);
+
+        if (!group) {
+            group = new THREE.Group();
+            group.position.set(poi.position[0], poi.position[1], 0);
+
+            // Ground Target Ring
+            const ringGeo = new THREE.RingGeometry(4, 5.5, 24);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xd500f9, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            group.add(ring);
+
+            // Vertical Beacon Laser Beam
+            const beamGeo = new THREE.CylinderGeometry(0.15, 0.15, poi.position[2] * 2, 8);
+            const beamMat = new THREE.MeshBasicMaterial({ color: 0xd500f9, transparent: true, opacity: 0.6 });
+            const beam = new THREE.Mesh(beamGeo, beamMat);
+            beam.rotation.x = Math.PI / 2;
+            beam.position.z = poi.position[2];
+            group.add(beam);
+
+            // Rotating Diamond Beacon
+            const beaconGeo = new THREE.OctahedronGeometry(1.6);
+            const beaconMat = new THREE.MeshBasicMaterial({ color: 0xd500f9, wireframe: true });
+            const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+            beacon.position.z = poi.position[2];
+            group.add(beacon);
+            group.beacon = beacon;
+
+            sceneTheater.add(group);
+            poiMeshes.set(poi.id, group);
+        }
+
+        if (poi.is_completed && group.beacon) {
+            group.beacon.material.color.setHex(0x00ff66);
+        }
+    });
+
+    const completed = poisData.filter(p => p.is_completed).length;
+    if (completed > lastSurveyedCount) {
+        lastSurveyedCount = completed;
+        playTacticalSound("poi_surveyed");
+    }
+}
+
+function updateLinks(linksData, routesData, dronesData) {
+    const activeKeys = new Set();
+    const nodeCoords = new Map();
+
+    dronesData.forEach(d => {
+        nodeCoords.set(d.id, new THREE.Vector3(...d.position));
+    });
+    nodeCoords.set("GCS", new THREE.Vector3(0, -150, 20));
+
+    const activeRoutePairs = new Set();
+    if (routesData) {
+        routesData.forEach(route => {
+            for (let i = 0; i < route.length - 1; i++) {
+                const u = route[i];
+                const v = route[i + 1];
+                activeRoutePairs.add(`${u}_${v}`);
+                activeRoutePairs.add(`${v}_${u}`);
+            }
+        });
+    }
+
+    linksData.forEach(link => {
+        const u = link.source;
+        const v = link.target;
+        const key = [u, v].sort().join("__");
+        activeKeys.add(key);
+
+        const p1 = nodeCoords.get(u);
+        const p2 = nodeCoords.get(v);
+        if (!p1 || !p2) return;
+
+        const isRouteEdge = activeRoutePairs.has(`${u}_${v}`);
+        const isLoRa = (link.band && link.band.includes("LORA")) || (link.distance > 80.0 && link.viable);
+        const linkColor = isRouteEdge ? 0x00ff66 : (isLoRa ? 0xffd600 : (link.viable ? 0x00e5ff : 0xff1744));
+
+        let line = linkMeshes.get(key);
+        if (!line) {
+            const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+            const mat = new THREE.LineBasicMaterial({
+                color: linkColor,
+                linewidth: isRouteEdge ? 3 : 1,
+                transparent: true,
+                opacity: isRouteEdge ? 0.95 : 0.4,
+            });
+            line = new THREE.Line(geo, mat);
+            sceneTheater.add(line);
+            linkMeshes.set(key, line);
+        } else {
+            line.geometry.setFromPoints([p1, p2]);
+            line.material.color.setHex(linkColor);
+            line.material.opacity = isRouteEdge ? 0.95 : 0.35;
+        }
+    });
+
+    for (const [key, line] of linkMeshes.entries()) {
+        if (!activeKeys.has(key)) {
+            sceneTheater.remove(line);
+            linkMeshes.delete(key);
+        }
+    }
+}
+
+// Scientific Turbo Colormap approximation for elevation color coding
+function getTurboRGB(val) {
+    const x = Math.max(0.0, Math.min(1.0, val));
+    const r = Math.max(0.0, Math.min(1.0, 0.1357 + x * (4.5155 + x * (-8.9837 + x * 4.3328))));
+    const g = Math.max(0.0, Math.min(1.0, 0.0914 + x * (2.1942 + x * (4.8429 + x * (-7.1281)))));
+    const b = Math.max(0.0, Math.min(1.0, 0.5060 + x * (2.4286 + x * (-8.4688 + x * 5.5342))));
+    return [r, g, b];
+}
+
+// Update 3D LiDAR Point Cloud in SLAM Viewport
+function updateLiDAR(scanData) {
+    if (!scanData || !lidarPointsMesh) return;
+    const pts = scanData.points || [];
+    const posAttr = lidarPointsMesh.geometry.attributes.position;
+    const colAttr = lidarPointsMesh.geometry.attributes.color;
+
+    const count = Math.min(pts.length, posAttr.count);
+    for (let i = 0; i < count; i++) {
+        const p = pts[i];
+        posAttr.array[i * 3] = p[0];
+        posAttr.array[i * 3 + 1] = p[1];
+        posAttr.array[i * 3 + 2] = p[2];
+
+        // Scientific Turbo elevation colormap (0m to 50m)
+        const zNorm = Math.min(1.0, Math.max(0.0, p[2] / 50.0));
+        const [r, g, b] = getTurboRGB(zNorm);
+
+        colAttr.array[i * 3] = r;
+        colAttr.array[i * 3 + 1] = g;
+        colAttr.array[i * 3 + 2] = b;
+    }
+
+    lidarPointsMesh.geometry.setDrawRange(0, count);
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+
+    const elPts = document.getElementById("slam-pts-count");
+    if (elPts) elPts.textContent = pts.length;
+}
+
+// Update 3D Occupancy Voxel Grid in SLAM Viewport with Cyber Edge Highlights
+function updateOccupancyVoxels(voxelsData, metricsData) {
+    if (!voxelMeshGroup) return;
+
+    // Clear previous voxels
+    while (voxelMeshGroup.children.length > 0) {
+        const child = voxelMeshGroup.children.pop();
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+    }
+
+    if (!voxelsData || voxelsData.length === 0) return;
+
+    const boxGeo = new THREE.BoxGeometry(4.0, 4.0, 4.0);
+    const edgeGeo = new THREE.EdgesGeometry(boxGeo);
+
+    voxelsData.forEach(v => {
+        const zNorm = Math.min(1.0, Math.max(0.0, v.pos[2] / 50.0));
+        const hexColor = zNorm > 0.4 ? 0xff3d00 : 0xff9100;
+
+        const boxMat = new THREE.MeshBasicMaterial({
+            color: hexColor,
+            transparent: true,
+            opacity: 0.30,
+        });
+        const mesh = new THREE.Mesh(boxGeo, boxMat);
+        mesh.position.set(v.pos[0], v.pos[1], v.pos[2]);
+
+        const wireMat = new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.70 });
+        const wire = new THREE.LineSegments(edgeGeo, wireMat);
+        mesh.add(wire);
+
+        voxelMeshGroup.add(mesh);
+    });
+
+    const elVox = document.getElementById("slam-voxels-count");
+    if (elVox) elVox.textContent = voxelsData.length;
+
+    if (metricsData) {
+        const elVol = document.getElementById("slam-vol-count");
+        if (elVol) elVol.textContent = `${metricsData.mapped_volume_m3 || 0} m³`;
+        const elCov = document.getElementById("metric-survey-rate");
+        if (elCov) elCov.textContent = `${(metricsData.coverage_pct || 14.2).toFixed(1)}% / min`;
+    }
+}
+
+// Update Khatib APF Guidance Vectors in SLAM Viewport
+function updateAPFVectors(apfData) {
+    if (!apfData || !slamDroneMesh) return;
+    const origin = slamDroneMesh.position.clone();
+
+    // 1. Attractive Force Arrow (Green)
+    const f_att = apfData.f_att || [0, 0, 0];
+    const v_att = new THREE.Vector3(f_att[0], f_att[1], f_att[2]);
+    const len_att = v_att.length();
+    if (len_att > 0.1 && apfArrowAtt) {
+        apfArrowAtt.position.copy(origin);
+        apfArrowAtt.setDirection(v_att.clone().normalize());
+        apfArrowAtt.setLength(Math.min(22, Math.max(4, len_att * 0.8)), 2.5, 1.2);
+        apfArrowAtt.visible = true;
+    } else if (apfArrowAtt) {
+        apfArrowAtt.visible = false;
+    }
+
+    // 2. Repulsive Obstacle Force Arrow (Red)
+    const f_rep = apfData.f_rep || [0, 0, 0];
+    const v_rep = new THREE.Vector3(f_rep[0], f_rep[1], f_rep[2]);
+    const len_rep = v_rep.length();
+    if (len_rep > 0.1 && apfArrowRep) {
+        apfArrowRep.position.copy(origin);
+        apfArrowRep.setDirection(v_rep.clone().normalize());
+        apfArrowRep.setLength(Math.min(24, Math.max(4, len_rep * 0.6)), 2.5, 1.2);
+        apfArrowRep.visible = true;
+    } else if (apfArrowRep) {
+        apfArrowRep.visible = false;
+    }
+
+    // 3. Resultant Commanded Acceleration Vector (Cyan)
+    const f_net = apfData.f_net || [0, 0, 0];
+    const v_net = new THREE.Vector3(f_net[0], f_net[1], f_net[2]);
+    const len_net = v_net.length();
+    if (len_net > 0.1 && apfArrowNet) {
+        apfArrowNet.position.copy(origin);
+        apfArrowNet.setDirection(v_net.clone().normalize());
+        apfArrowNet.setLength(Math.min(28, Math.max(5, len_net * 0.7)), 3, 1.5);
+        apfArrowNet.visible = true;
+    } else if (apfArrowNet) {
+        apfArrowNet.visible = false;
+    }
+
+    // Live APF Net Force Readout in Inspect Panel
+    const elApf = document.getElementById("inspect-apf-net");
+    if (elApf) {
+        const netMag = apfData.mag_net !== undefined ? apfData.mag_net : len_net;
+        elApf.textContent = `${netMag.toFixed(1)} N`;
+    }
+}
+
+// Select Active Drone for SLAM & Inspection
+function selectDrone(droneId) {
+    selectedDroneId = droneId;
+    slamTrajectoryPoints = []; // reset trajectory trail for new drone
+
+    // Inform server to direct LiDAR scanning to this drone
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ command: "focus_drone", drone_id: droneId }));
+    }
+
+    const label = document.getElementById("slam-drone-id");
+    if (label) label.textContent = droneId;
+    const labelHeader = document.getElementById("slam-tracking-label");
+    if (labelHeader) labelHeader.textContent = `TRACKING ${droneId} LIDAR & OCTOMAP &bull; APF GUIDANCE`;
+
+    if (latestTelemetry) {
+        const drone = (latestTelemetry.drones || []).find(d => d.id === droneId);
+        if (drone) updateInspectPanel(drone);
+        updateHUD(latestTelemetry);
+    }
+}
+
+// ============================================================================
+// Scientific Analytics Dashboard (Chart.js)
+// ============================================================================
+
+function initScientificCharts() {
+    if (typeof Chart === "undefined") {
+        console.warn("Chart.js not loaded, skipping charts initialization.");
+        return;
+    }
+
+    // Chart 1: EKF Convergence
+    const ctxEKF = document.getElementById("chart-ekf");
+    if (ctxEKF) {
+        chartEKF = new Chart(ctxEKF, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [{
+                    label: "Avg EKF Error (m)",
+                    data: [],
+                    borderColor: "#00ff66",
+                    backgroundColor: "rgba(0, 255, 102, 0.1)",
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: { display: false },
+                    y: {
+                        min: 0,
+                        max: 0.5,
+                        grid: { color: "rgba(255, 255, 255, 0.08)" },
+                        ticks: { color: "#8b949e", font: { size: 9 } }
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    // Chart 2: PDR & Throughput
+    const ctxPDR = document.getElementById("chart-pdr");
+    if (ctxPDR) {
+        chartPDR = new Chart(ctxPDR, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: "PDR (%)",
+                        data: [],
+                        borderColor: "#00e5ff",
+                        borderWidth: 2,
+                        yAxisID: "yPDR",
+                    },
+                    {
+                        label: "Throughput (kbps)",
+                        data: [],
+                        borderColor: "#ffd600",
+                        borderWidth: 2,
+                        yAxisID: "yTP",
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: { display: false },
+                    yPDR: {
+                        type: "linear",
+                        position: "left",
+                        min: 90,
+                        max: 100,
+                        grid: { color: "rgba(255, 255, 255, 0.08)" },
+                        ticks: { color: "#00e5ff", font: { size: 9 } }
+                    },
+                    yTP: {
+                        type: "linear",
+                        position: "right",
+                        min: 0,
+                        max: 100,
+                        grid: { display: false },
+                        ticks: { color: "#ffd600", font: { size: 9 } }
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    // Chart 3: RF Link SNR vs Distance
+    const ctxRF = document.getElementById("chart-rf");
+    if (ctxRF) {
+        chartRF = new Chart(ctxRF, {
+            type: "scatter",
+            data: {
+                datasets: [
+                    {
+                        label: "Active Links (SNR dB)",
+                        data: [
+                            { x: 25, y: 32 }, { x: 45, y: 26 }, { x: 70, y: 19 },
+                            { x: 95, y: 14 }, { x: 125, y: 8 }
+                        ],
+                        backgroundColor: "#ffd600",
+                        pointRadius: 4,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: "Distance (m)", color: "#8b949e", font: { size: 9 } },
+                        grid: { color: "rgba(255, 255, 255, 0.08)" },
+                        ticks: { color: "#8b949e", font: { size: 9 } }
+                    },
+                    y: {
+                        title: { display: true, text: "SNR (dB)", color: "#8b949e", font: { size: 9 } },
+                        min: 0,
+                        max: 40,
+                        grid: { color: "rgba(255, 255, 255, 0.08)" },
+                        ticks: { color: "#8b949e", font: { size: 9 } }
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    // Chart 4: Fleet Battery Depletion
+    const ctxBat = document.getElementById("chart-battery");
+    if (ctxBat) {
+        chartBattery = new Chart(ctxBat, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    { label: "UAV_1", data: [], borderColor: "#00e5ff", borderWidth: 1.5, fill: false },
+                    { label: "UAV_2", data: [], borderColor: "#00ff66", borderWidth: 1.5, fill: false },
+                    { label: "RELAY_1", data: [], borderColor: "#ffd600", borderWidth: 2.0, fill: false },
+                    { label: "RELAY_2", data: [], borderColor: "#ff9100", borderWidth: 2.0, fill: false },
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: { display: false },
+                    y: {
+                        min: 60,
+                        max: 100,
+                        grid: { color: "rgba(255, 255, 255, 0.08)" },
+                        ticks: { color: "#8b949e", font: { size: 9 } }
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+}
+
+function updateScientificCharts(telemetry) {
+    try {
+        if (!telemetry || !chartEKF) return;
+        const now = performance.now();
+        if (now - lastChartUpdate < 400) return; // update at ~2.5 Hz to keep performance silky
+        lastChartUpdate = now;
+
+        const t = (telemetry.sim_time || 0).toFixed(1);
+        const analytics = telemetry.analytics || {};
+        const ekfErr = analytics.avg_ekf_error_m || 0.08;
+        const pdr = analytics.pdr || 100.0;
+        const tp = analytics.throughput_kbps || 35.0;
+
+        // Update EKF Chart
+        if (chartEKF && chartEKF.data && chartEKF.data.labels) {
+            chartEKF.data.labels.push(t);
+            chartEKF.data.datasets[0].data.push(ekfErr);
+            if (chartEKF.data.labels.length > 25) {
+                chartEKF.data.labels.shift();
+                chartEKF.data.datasets[0].data.shift();
+            }
+            chartEKF.update("none");
+        }
+
+        const elEkfBadge = document.getElementById("chart-ekf-badge");
+        if (elEkfBadge) elEkfBadge.textContent = `${ekfErr.toFixed(2)}m (CONVERGED)`;
+
+        // Update PDR Chart
+        if (chartPDR && chartPDR.data && chartPDR.data.labels) {
+            chartPDR.data.labels.push(t);
+            chartPDR.data.datasets[0].data.push(pdr);
+            chartPDR.data.datasets[1].data.push(tp);
+            if (chartPDR.data.labels.length > 25) {
+                chartPDR.data.labels.shift();
+                chartPDR.data.datasets[0].data.shift();
+                chartPDR.data.datasets[1].data.shift();
+            }
+            chartPDR.update("none");
+        }
+
+        // Update RF Link SNR Scatter
+        if (chartRF && chartRF.data && telemetry.links) {
+            const scatterData = telemetry.links
+                .filter(l => l.viable)
+                .map(l => ({ x: Math.round(l.distance), y: Math.round(l.snr) }));
+            chartRF.data.datasets[0].data = scatterData;
+            chartRF.update("none");
+        }
+
+        // Update Battery Chart
+        if (chartBattery && chartBattery.data && telemetry.drones) {
+            chartBattery.data.labels.push(t);
+            telemetry.drones.slice(0, 4).forEach((d, idx) => {
+                if (chartBattery.data.datasets[idx]) {
+                    chartBattery.data.datasets[idx].data.push(d.battery_pct);
+                    if (chartBattery.data.datasets[idx].data.length > 25) {
+                        chartBattery.data.datasets[idx].data.shift();
+                    }
+                }
+            });
+            if (chartBattery.data.labels.length > 25) {
+                chartBattery.data.labels.shift();
+            }
+            chartBattery.update("none");
+        }
+    } catch (err) {
+        console.warn("Chart update warning:", err);
+    }
+}
+
+// ============================================================================
+// HUD Updates
+// ============================================================================
+
+function updateHUD(telemetry) {
+    if (!telemetry) return;
+    latestTelemetry = telemetry;
+
+    // Header metrics
+    const t = telemetry.sim_time || 0;
+    const mins = Math.floor(t / 60);
+    const secs = (t % 60).toFixed(1);
+    document.getElementById("metric-time").textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(4, '0')}`;
+
+    const metrics = telemetry.metrics || {};
+    document.getElementById("metric-pdr").textContent = `${((metrics.pdr || 1.0) * 100).toFixed(1)}%`;
+    document.getElementById("metric-latency").textContent = `${(metrics.avg_latency_ms || 8.5).toFixed(1)} ms`;
+
+    const analytics = telemetry.analytics || {};
+    const elEkf = document.getElementById("metric-ekf-err");
+    if (elEkf) elEkf.textContent = `${(analytics.avg_ekf_error_m || 0.08).toFixed(2)} m`;
+
+    const pois = telemetry.pois || [];
+    const completedCount = pois.filter(p => p.is_completed).length;
+    document.getElementById("metric-pois").textContent = `${completedCount} / ${pois.length}`;
+
+    // Fleet List
+    const fleetContainer = document.getElementById("fleet-list");
+    fleetContainer.innerHTML = "";
+    (telemetry.drones || []).forEach(d => {
+        const card = document.createElement("div");
+        card.className = `drone-card ${d.role.toLowerCase()} ${selectedDroneId === d.id ? 'selected' : ''}`;
+        card.addEventListener("click", () => selectDrone(d.id));
+        card.innerHTML = `
+            <div class="drone-header">
+                <span>${d.id} [${d.role}]</span>
+                <span class="text-cyan">${d.flight_mode}</span>
+            </div>
+            <div class="drone-stats">
+                <div>ALT: <span>${d.position[2].toFixed(1)}m</span></div>
+                <div>BAT: <span>${d.battery_pct.toFixed(0)}%</span></div>
+                <div>SPD: <span>${Math.hypot(d.velocity[0], d.velocity[1]).toFixed(1)} m/s</span></div>
+                <div>POI: <span>${d.assigned_poi_id || 'NONE'}</span></div>
+            </div>
+        `;
+        fleetContainer.appendChild(card);
+    });
+
+    // Routes List
+    const routesContainer = document.getElementById("routes-list");
+    routesContainer.innerHTML = "";
+    (telemetry.active_routes || []).forEach(path => {
+        const div = document.createElement("div");
+        div.className = "route-badge";
+        div.innerHTML = `<span>${path.join(" ➔ ")} (${path.length - 1} HOPS)</span>`;
+        routesContainer.appendChild(div);
+    });
+
+    // Links List
+    const linksContainer = document.getElementById("links-list");
+    linksContainer.innerHTML = "";
+    (telemetry.links || []).forEach(link => {
+        const div = document.createElement("div");
+        div.className = "link-row";
+        const isLoRa = (link.band && link.band.includes("LORA")) || (link.distance > 80.0 && link.viable);
+        const bandTag = isLoRa ? '<span class="link-lora">[915MHz]</span>' : '<span class="link-payload">[2.4GHz]</span>';
+        div.innerHTML = `
+            <span>${link.source} ↔ ${link.target} ${bandTag}</span>
+            <span class="${link.viable ? 'text-neon-green' : 'text-red'}">${link.snr} dB (${link.distance.toFixed(0)}m)</span>
+        `;
+        linksContainer.appendChild(div);
+    });
+
+    // PoIs Grid
+    const poiContainer = document.getElementById("poi-list");
+    poiContainer.innerHTML = "";
+    pois.forEach(p => {
+        const card = document.createElement("div");
+        card.className = `poi-card ${(p.priority || 'MEDIUM').toLowerCase()}`;
+        card.innerHTML = `
+            <div style="display:flex; justify-content:space-between;">
+                <strong>${p.id}</strong>
+                <span class="${p.is_completed ? 'text-neon-green' : 'text-purple'}">${p.is_completed ? 'DONE' : p.progress + '%'}</span>
+            </div>
+            <div class="poi-progress-bar">
+                <div class="poi-progress-fill ${p.is_completed ? 'completed' : ''}" style="width: ${p.progress}%"></div>
+            </div>
+        `;
+        poiContainer.appendChild(card);
+    });
+
+    // Update Inspect Panel
+    if (selectedDroneId) {
+        const selectedDrone = (telemetry.drones || []).find(d => d.id === selectedDroneId);
+        if (selectedDrone) updateInspectPanel(selectedDrone);
+    }
+
+    // Update Scientific Charts
+    updateScientificCharts(telemetry);
+}
+
+function updateInspectPanel(d) {
+    const pnl = document.getElementById("drone-inspect-panel");
+    if (!pnl) return;
+    pnl.classList.remove("hidden");
+    const elId = document.getElementById("inspect-id");
+    if (elId) elId.textContent = `${d.id} AVIONICS TELEMETRY`;
+    const elRole = document.getElementById("inspect-role");
+    if (elRole) elRole.textContent = d.role;
+    const elMode = document.getElementById("inspect-mode");
+    if (elMode) elMode.textContent = d.flight_mode;
+    const elTruePos = document.getElementById("inspect-true-pos");
+    if (elTruePos) elTruePos.textContent = `${d.position[0].toFixed(1)}, ${d.position[1].toFixed(1)}, ${d.position[2].toFixed(1)}m`;
+    const est = d.estimated_position || d.position;
+    const elEstPos = document.getElementById("inspect-est-pos");
+    if (elEstPos) elEstPos.textContent = `${est[0].toFixed(1)}, ${est[1].toFixed(1)}, ${est[2].toFixed(1)}m`;
+    const err = d.ekf_error_m !== undefined ? d.ekf_error_m : Math.hypot(d.position[0]-est[0], d.position[1]-est[1], d.position[2]-est[2]);
+    const elErr = document.getElementById("inspect-ekf-err");
+    if (elErr) elErr.textContent = `${err.toFixed(2)} m (EKF 9-State)`;
+    const spd = Math.hypot(d.velocity[0], d.velocity[1], d.velocity[2]);
+    const elSpd = document.getElementById("inspect-speed");
+    if (elSpd) elSpd.textContent = `${spd.toFixed(1)} m/s`;
+    const elBat = document.getElementById("inspect-battery");
+    if (elBat) elBat.textContent = `${d.battery_pct.toFixed(0)}%`;
+    const elTgt = document.getElementById("inspect-target");
+    if (elTgt) elTgt.textContent = d.assigned_poi_id || (d.target_position ? `[${d.target_position[0].toFixed(0)}, ${d.target_position[1].toFixed(0)}, ${d.target_position[2].toFixed(0)}]` : 'NONE');
+
+    // Euler attitude angles (degrees)
+    const roll = d.roll_deg !== undefined ? d.roll_deg : ((d.attitude ? d.attitude[0] : 0) * 180 / Math.PI);
+    const pitch = d.pitch_deg !== undefined ? d.pitch_deg : ((d.attitude ? d.attitude[1] : 0) * 180 / Math.PI);
+    const yaw = d.yaw_deg !== undefined ? d.yaw_deg : ((d.attitude ? d.attitude[2] : 0) * 180 / Math.PI);
+
+    const elAtt = document.getElementById("inspect-attitude");
+    if (elAtt) elAtt.textContent = `R:${roll.toFixed(1)}° P:${pitch.toFixed(1)}° Y:${yaw.toFixed(1)}°`;
+
+    // Render Primary Flight Display (PFD)
+    drawPFD(roll, pitch, yaw, d.position[2], spd);
+}
+
+// ============================================================================
+// Primary Flight Display (PFD) Artificial Horizon Instrument
+// ============================================================================
+
+function drawPFD(rollDeg, pitchDeg, yawDeg, alt, speed) {
+    const canvas = document.getElementById("pfd-canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+    const cx = w / 2;
+    const cy = h / 2 + 5;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. Top Heading Compass Tape
+    ctx.fillStyle = "rgba(4, 10, 20, 0.95)";
+    ctx.fillRect(0, 0, w, 18);
+    ctx.strokeStyle = "rgba(0, 229, 255, 0.35)";
+    ctx.strokeRect(0, 0, w, 18);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, 18);
+    ctx.clip();
+
+    const yaw = ((yawDeg % 360) + 360) % 360;
+    ctx.font = "bold 9px 'Consolas', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (let deg = Math.floor(yaw - 50); deg <= Math.ceil(yaw + 50); deg += 10) {
+        const normDeg = ((deg % 360) + 360) % 360;
+        const xOffset = cx + (deg - yaw) * 2.2;
+        let label = String(Math.round(normDeg / 10)).padStart(2, '0');
+        if (normDeg === 0) label = "N";
+        else if (normDeg === 90) label = "E";
+        else if (normDeg === 180) label = "S";
+        else if (normDeg === 270) label = "W";
+
+        ctx.fillStyle = (label === "N") ? "#ff1744" : "#00e5ff";
+        ctx.fillText(label, xOffset, 9);
+        ctx.strokeStyle = "rgba(0, 229, 255, 0.5)";
+        ctx.beginPath();
+        ctx.moveTo(xOffset, 14);
+        ctx.lineTo(xOffset, 18);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // Lubber Line (Center triangle on heading tape)
+    ctx.fillStyle = "#ffd600";
+    ctx.beginPath();
+    ctx.moveTo(cx, 18);
+    ctx.lineTo(cx - 4, 12);
+    ctx.lineTo(cx + 4, 12);
+    ctx.closePath();
+    ctx.fill();
+
+    // 2. Artificial Horizon Sphere (Clipped to central instrument viewport)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(36, 20, w - 72, h - 22);
+    ctx.clip();
+
+    ctx.translate(cx, cy);
+    ctx.rotate(-rollDeg * Math.PI / 180);
+
+    const pitchPx = (pitchDeg || 0) * 1.5;
+    ctx.translate(0, pitchPx);
+
+    // Sky gradient (Deep aerospace blue)
+    const skyGrad = ctx.createLinearGradient(0, -120, 0, 0);
+    skyGrad.addColorStop(0, "#082048");
+    skyGrad.addColorStop(1, "#144888");
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(-180, -180, 360, 180);
+
+    // Ground gradient (Tactical earth brown)
+    const groundGrad = ctx.createLinearGradient(0, 0, 0, 120);
+    groundGrad.addColorStop(0, "#4a2d12");
+    groundGrad.addColorStop(1, "#221307");
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(-180, 0, 360, 180);
+
+    // White Horizon Divider Line
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-120, 0);
+    ctx.lineTo(120, 0);
+    ctx.stroke();
+
+    // Pitch ladder rungs (+10, +20, -10, -20)
+    ctx.lineWidth = 1;
+    ctx.font = "8px 'Consolas', monospace";
+    for (let p of [-30, -20, -10, 10, 20, 30]) {
+        const py = -p * 1.5;
+        const rungW = p % 20 === 0 ? 28 : 16;
+        ctx.strokeStyle = p > 0 ? "rgba(255,255,255,0.85)" : "rgba(255,200,100,0.85)";
+        ctx.beginPath();
+        ctx.moveTo(-rungW, py);
+        ctx.lineTo(-6, py);
+        ctx.moveTo(6, py);
+        ctx.lineTo(rungW, py);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "right";
+        ctx.fillText(Math.abs(p), -rungW - 3, py + 3);
+        ctx.textAlign = "left";
+        ctx.fillText(Math.abs(p), rungW + 3, py + 3);
+    }
+    ctx.restore();
+
+    // 3. Fixed Aircraft Reference Symbol (Yellow crosshair wings)
+    ctx.strokeStyle = "#ffd600";
+    ctx.fillStyle = "#ffd600";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - 24, cy);
+    ctx.lineTo(cx - 8, cy);
+    ctx.lineTo(cx - 8, cy + 4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + 24, cy);
+    ctx.lineTo(cx + 8, cy);
+    ctx.lineTo(cx + 8, cy + 4);
+    ctx.stroke();
+
+    // 4. Roll Bank Index Arc
+    ctx.strokeStyle = "rgba(0, 229, 255, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 38, -Math.PI * 0.75, -Math.PI * 0.25);
+    ctx.stroke();
+
+    const rollRad = -rollDeg * Math.PI / 180 - Math.PI / 2;
+    const rx = cx + Math.cos(rollRad) * 38;
+    const ry = cy + Math.sin(rollRad) * 38;
+    ctx.fillStyle = "#ffd600";
+    ctx.beginPath();
+    ctx.arc(rx, ry, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 5. Airspeed Tape on Left
+    ctx.fillStyle = "rgba(5, 12, 24, 0.88)";
+    ctx.fillRect(0, 20, 35, h - 22);
+    ctx.strokeStyle = "rgba(0, 229, 255, 0.35)";
+    ctx.strokeRect(0, 20, 35, h - 22);
+    ctx.fillStyle = "#00e5ff";
+    ctx.font = "bold 8px 'Consolas', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("SPD", 17, 30);
+    ctx.font = "bold 11px 'Consolas', monospace";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${(speed || 0).toFixed(1)}`, 17, 50);
+    ctx.font = "7px 'Consolas', monospace";
+    ctx.fillStyle = "#8b949e";
+    ctx.fillText("M/S", 17, 62);
+
+    // 6. Altitude Tape on Right
+    ctx.fillStyle = "rgba(5, 12, 24, 0.88)";
+    ctx.fillRect(w - 35, 20, 35, h - 22);
+    ctx.strokeStyle = "rgba(0, 229, 255, 0.35)";
+    ctx.strokeRect(w - 35, 20, 35, h - 22);
+    ctx.fillStyle = "#00ff66";
+    ctx.font = "bold 8px 'Consolas', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("ALT", w - 17, 30);
+    ctx.font = "bold 11px 'Consolas', monospace";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${(alt || 0).toFixed(0)}`, w - 17, 50);
+    ctx.font = "7px 'Consolas', monospace";
+    ctx.fillStyle = "#8b949e";
+    ctx.fillText("M", w - 17, 62);
+}
+
+// ============================================================================
+// Procedural Tactical Audio Engine (Web Audio API)
+// ============================================================================
+
+function initAudio() {
+    if (!audioContext) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+            audioContext = new AudioCtx();
+        }
+    }
+    if (audioContext && audioContext.state === "suspended") {
+        audioContext.resume();
+    }
+}
+
+function playTacticalSound(type) {
+    if (isAudioMuted || !audioContext) return;
+    try {
+        const now = audioContext.currentTime;
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+
+        if (type === "radar_ping") {
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(1600, now);
+            osc.frequency.exponentialRampToValueAtTime(700, now + 0.12);
+            gain.gain.setValueAtTime(0.06, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+            osc.start(now);
+            osc.stop(now + 0.12);
+        } else if (type === "relay_lock") {
+            osc.type = "triangle";
+            osc.frequency.setValueAtTime(587, now);
+            osc.frequency.setValueAtTime(880, now + 0.08);
+            gain.gain.setValueAtTime(0.07, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+            osc.start(now);
+            osc.stop(now + 0.22);
+        } else if (type === "poi_surveyed") {
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(523, now);
+            osc.frequency.setValueAtTime(659, now + 0.07);
+            osc.frequency.setValueAtTime(784, now + 0.14);
+            gain.gain.setValueAtTime(0.09, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+            osc.start(now);
+            osc.stop(now + 0.35);
+        }
+    } catch (err) {
+        // audio play error handled safely
+    }
+}
+
+// High-Resolution Snapshot Capture
+function takeSnapshot() {
+    try {
+        if (!rendererTheater) return;
+        rendererTheater.render(sceneTheater, cameraTheater);
+        const dataUrl = rendererTheater.domElement.toDataURL("image/png");
+        const a = document.createElement("a");
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        a.download = `uav_mission_snapshot_${timestamp}.png`;
+        a.href = dataUrl;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    } catch (err) {
+        console.error("Snapshot error:", err);
+    }
+}
+
+// ============================================================================
+// WebSocket Connection
+// ============================================================================
+
+function connectWebSocket() {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host || "localhost:8000";
+    const wsUrl = `${protocol}//${host}/ws`;
+
+    socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+        const badge = document.getElementById("badge-network");
+        if (badge) {
+            badge.textContent = "8 NODES MESH";
+            badge.className = "badge badge-active";
+        }
+    };
+
+    socket.onmessage = (event) => {
+        try {
+            const telemetry = JSON.parse(event.data);
+            if (telemetry.drones) updateDrones(telemetry.drones);
+            if (telemetry.obstacles) updateObstacles(telemetry.obstacles);
+            if (telemetry.pois) updatePoIs(telemetry.pois);
+            if (telemetry.links && telemetry.drones) updateLinks(telemetry.links, telemetry.active_routes, telemetry.drones);
+            if (telemetry.lidar_scan) updateLiDAR(telemetry.lidar_scan);
+            if (telemetry.occupied_voxels) updateOccupancyVoxels(telemetry.occupied_voxels, telemetry.mapping_metrics);
+            if (telemetry.apf_vectors) updateAPFVectors(telemetry.apf_vectors);
+            updateHUD(telemetry);
+        } catch (e) {
+            console.error("Telemetry parse error", e);
+        }
+    };
+
+    socket.onclose = () => {
+        const badge = document.getElementById("badge-network");
+        if (badge) {
+            badge.textContent = "RECONNECTING...";
+            badge.className = "badge text-red";
+        }
+        setTimeout(connectWebSocket, 2000);
+    };
+}
+
+// ============================================================================
+// UI Event Handlers & View Modes
+// ============================================================================
+
+function initUIControls() {
+    // View Mode Buttons (Split, Theater, SLAM, PiP)
+    document.querySelectorAll(".btn-mode").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            document.querySelectorAll(".btn-mode").forEach(b => b.classList.remove("active"));
+            e.target.classList.add("active");
+            const mode = e.target.getAttribute("data-mode");
+            setViewportMode(mode);
+        });
+    });
+
+    // Pause / Resume
+    const btnPause = document.getElementById("btn-pause");
+    btnPause.addEventListener("click", () => {
+        isPaused = !isPaused;
+        btnPause.textContent = isPaused ? "RESUME" : "PAUSE";
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ command: isPaused ? "pause" : "resume" }));
+        }
+    });
+
+    // Reset
+    const btnReset = document.getElementById("btn-reset");
+    btnReset.addEventListener("click", () => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ command: "reset" }));
+        }
+    });
+
+    // Speed Control
+    const selectSpeed = document.getElementById("select-speed");
+    selectSpeed.addEventListener("change", (e) => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ command: "speed", value: parseFloat(e.target.value) }));
+        }
+    });
+
+    // Analytics Drawer Toggle
+    const btnAnalytics = document.getElementById("btn-toggle-analytics");
+    const drawerAnalytics = document.getElementById("analytics-drawer");
+    const btnCloseAnalytics = document.getElementById("btn-close-analytics");
+
+    if (btnAnalytics && drawerAnalytics) {
+        btnAnalytics.addEventListener("click", () => {
+            drawerAnalytics.classList.toggle("hidden");
+        });
+    }
+    if (btnCloseAnalytics && drawerAnalytics) {
+        btnCloseAnalytics.addEventListener("click", () => {
+            drawerAnalytics.classList.add("hidden");
+        });
+    }
+
+    // Investor Pitch Mode Button & Lower-Third Bar
+    const btnInvestor = document.getElementById("btn-investor");
+    const btnExitInvestor = document.getElementById("btn-exit-investor");
+    const investorLowerBar = document.getElementById("investor-lower-bar");
+
+    if (btnInvestor) {
+        btnInvestor.addEventListener("click", () => {
+            isInvestorMode = !isInvestorMode;
+            if (isInvestorMode) {
+                investorStartTime = performance.now();
+                if (investorLowerBar) investorLowerBar.classList.remove("hidden");
+                setViewportMode("split");
+                initAudio();
+                playTacticalSound("relay_lock");
+            } else {
+                if (investorLowerBar) investorLowerBar.classList.add("hidden");
+            }
+        });
+    }
+
+    if (btnExitInvestor) {
+        btnExitInvestor.addEventListener("click", () => {
+            isInvestorMode = false;
+            if (investorLowerBar) investorLowerBar.classList.add("hidden");
+        });
+    }
+
+    // Audio Mute/Unmute Toggle Button
+    const btnAudio = document.getElementById("btn-audio");
+    if (btnAudio) {
+        btnAudio.addEventListener("click", () => {
+            initAudio();
+            isAudioMuted = !isAudioMuted;
+            btnAudio.textContent = isAudioMuted ? "AUDIO OFF" : "AUDIO ON";
+            btnAudio.classList.toggle("text-neon-green", !isAudioMuted);
+            if (!isAudioMuted) {
+                playTacticalSound("radar_ping");
+            }
+        });
+    }
+
+    // High-Res Mission Snapshot Button
+    const btnSnapshot = document.getElementById("btn-snapshot");
+    if (btnSnapshot) {
+        btnSnapshot.addEventListener("click", () => {
+            takeSnapshot();
+            playTacticalSound("radar_ping");
+        });
+    }
+
+    // Camera view buttons
+    document.querySelectorAll(".btn-cam").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            document.querySelectorAll(".btn-cam").forEach(b => b.classList.remove("active"));
+            e.target.classList.add("active");
+
+            const mode = e.target.getAttribute("data-cam");
+            activeCamMode = mode;
+            const flirOverlay = document.getElementById("flir-overlay");
+
+            if (mode === "flir") {
+                if (flirOverlay) flirOverlay.classList.remove("hidden");
+                sceneTheater.background = new THREE.Color(0x021008);
+            } else {
+                if (flirOverlay) flirOverlay.classList.add("hidden");
+                sceneTheater.background = new THREE.Color(0x060a12);
+            }
+
+            if (mode === "top") {
+                cameraTheater.position.set(0, 0, 320);
+                controlsTheater.target.set(0, 0, 0);
+            } else if (mode === "orbit") {
+                cameraTheater.position.set(0, -290, 170);
+                controlsTheater.target.set(0, 0, 25);
+            } else if (mode === "gcs") {
+                cameraTheater.position.set(0, -150, 22);
+                controlsTheater.target.set(0, 0, 35);
+            }
+        });
+    });
+
+    // Close inspect panel
+    const btnCloseInspect = document.getElementById("btn-close-inspect");
+    if (btnCloseInspect) {
+        btnCloseInspect.addEventListener("click", () => {
+            const pnl = document.getElementById("drone-inspect-panel");
+            if (pnl) pnl.classList.add("hidden");
+        });
+    }
+
+    // Export CSV
+    const btnExport = document.getElementById("btn-export-csv");
+    if (btnExport) {
+        btnExport.addEventListener("click", () => {
+            window.location.href = "/api/export_telemetry";
+        });
+    }
+
+    window.addEventListener("resize", onWindowResize);
+    animate();
+}
+
+function setViewportMode(mode) {
+    activeViewportMode = mode;
+    const wrapper = document.getElementById("viewports-wrapper");
+    if (!wrapper) return;
+    wrapper.className = `mode-${mode}`;
+    setTimeout(onWindowResize, 50);
+}
+
+function onWindowResize() {
+    const cTheater = document.getElementById("canvas-theater-container");
+    if (cTheater && rendererTheater && cameraTheater) {
+        const w = cTheater.clientWidth;
+        const h = cTheater.clientHeight;
+        if (w > 0 && h > 0) {
+            cameraTheater.aspect = w / h;
+            cameraTheater.updateProjectionMatrix();
+            rendererTheater.setSize(w, h);
+        }
+    }
+
+    const cSLAM = document.getElementById("canvas-slam-container");
+    if (cSLAM && rendererSLAM && cameraSLAM) {
+        const w = cSLAM.clientWidth;
+        const h = cSLAM.clientHeight;
+        if (w > 0 && h > 0) {
+            cameraSLAM.aspect = w / h;
+            cameraSLAM.updateProjectionMatrix();
+            rendererSLAM.setSize(w, h);
+        }
+    }
+}
+
+// ============================================================================
+// Animation Loop & Investor Presentation Mode
+// ============================================================================
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    // Spin Propeller Rotors and Blurred Discs
+    rotorMeshes.forEach(rotor => {
+        rotor.rotation.z += 0.45;
+    });
+
+    // Animate FAA / Military LED Navigation Strobes
+    const tSec = performance.now() * 0.001;
+    strobeObjects.forEach(strobe => {
+        if (strobe.strobeType === "beacon") {
+            const pulse = (Math.sin(tSec * 9.42) > 0.6 && Math.sin(tSec * 18.84) > 0) ? 1.0 : 0.08;
+            strobe.material.opacity = pulse;
+        } else if (strobe.strobeType === "port") {
+            const pulse = Math.sin(tSec * 6.28) > 0.4 ? 1.0 : 0.15;
+            strobe.material.opacity = pulse;
+        } else if (strobe.strobeType === "starboard") {
+            const pulse = 0.5 + 0.5 * Math.sin(tSec * 6.28);
+            strobe.material.opacity = pulse > 0.3 ? 0.95 : 0.2;
+        }
+    });
+
+    // Rotate SLAM LiDAR 360° Sweep Beam
+    if (lidarSweepLine && slamDroneMesh) {
+        lidarSweepLine.position.copy(slamDroneMesh.position);
+        lidarSweepLine.rotation.z += 0.08;
+    }
+
+    // Update Disaster Smoke Particles
+    if (smokeParticles) {
+        const pos = smokeParticles.geometry.attributes.position.array;
+        const speeds = smokeParticles.speeds;
+        const origins = smokeParticles.origins;
+        for (let i = 0; i < speeds.length; i++) {
+            pos[i * 3 + 2] += speeds[i];
+            pos[i * 3] += (Math.random() - 0.48) * 0.15;
+            pos[i * 3 + 1] += (Math.random() - 0.48) * 0.15;
+            if (pos[i * 3 + 2] > 55) {
+                const orig = origins[i % origins.length];
+                pos[i * 3] = orig.x + (Math.random() - 0.5) * 8;
+                pos[i * 3 + 1] = orig.y + (Math.random() - 0.5) * 8;
+                pos[i * 3 + 2] = orig.z;
+            }
+        }
+        smokeParticles.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Update Ground Wash Dust
+    if (washParticles && droneMeshes.size > 0) {
+        const pos = washParticles.geometry.attributes.position.array;
+        let pIdx = 0;
+        droneMeshes.forEach((mesh) => {
+            if (mesh.position.z < 15.0 && pIdx < pos.length - 9) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 2.0 + Math.random() * 4.0;
+                pos[pIdx] = mesh.position.x + Math.cos(angle) * r;
+                pos[pIdx + 1] = mesh.position.y + Math.sin(angle) * r;
+                pos[pIdx + 2] = 0.2 + Math.random() * 0.8;
+                pIdx += 3;
+            }
+        });
+        washParticles.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Handle Investor Pitch Choreography
+    if (isInvestorMode) {
+        handleInvestorChoreography();
+    } else {
+        // Normal Camera Control
+        if (activeCamMode === "fpv") {
+            const targetMesh = droneMeshes.get(selectedDroneId) || droneMeshes.values().next().value;
+            if (targetMesh) {
+                const forward = new THREE.Vector3(0, 1, 0).applyQuaternion(targetMesh.quaternion);
+                const camPos = targetMesh.position.clone().sub(forward.clone().multiplyScalar(14)).add(new THREE.Vector3(0, 0, 6));
+                cameraTheater.position.lerp(camPos, 0.08);
+                controlsTheater.target.lerp(targetMesh.position.clone().add(forward.clone().multiplyScalar(10)), 0.12);
+            }
+        } else if (activeCamMode === "gcs") {
+            cameraTheater.position.set(0, -150, 22);
+            const focusMesh = droneMeshes.get(selectedDroneId) || droneMeshes.get("UAV_1");
+            if (focusMesh) {
+                controlsTheater.target.lerp(focusMesh.position, 0.05);
+            }
+        }
+    }
+
+    // Update SLAM Camera to follow focused drone smoothly
+    if (slamDroneMesh && controlsSLAM) {
+        const offset = new THREE.Vector3(0, -45, 30);
+        const desiredPos = slamDroneMesh.position.clone().add(offset);
+        cameraSLAM.position.lerp(desiredPos, 0.06);
+        controlsSLAM.target.lerp(slamDroneMesh.position, 0.1);
+        controlsSLAM.update();
+    }
+
+    if (controlsTheater) controlsTheater.update();
+
+    // Render both viewports
+    if (rendererTheater && sceneTheater && cameraTheater) {
+        rendererTheater.render(sceneTheater, cameraTheater);
+    }
+    if (rendererSLAM && sceneSLAM && cameraSLAM && (activeViewportMode !== "theater")) {
+        rendererSLAM.render(sceneSLAM, cameraSLAM);
+    }
+}
+
+// Automated 60-Second Investor Presentation Choreography
+let currentInvestorPhase = -1;
+function handleInvestorChoreography() {
+    const elapsedSec = (performance.now() - investorStartTime) / 1000;
+    const titleEl = document.getElementById("investor-phase-title");
+    const descEl = document.getElementById("investor-phase-desc");
+    const phase = Math.floor(elapsedSec / 15) % 4;
+
+    if (phase !== currentInvestorPhase) {
+        currentInvestorPhase = phase;
+        playTacticalSound("relay_lock");
+    }
+
+    if (elapsedSec < 15) {
+        // Phase 1: Fleet Launch & Coordinated Dispersal
+        if (titleEl) titleEl.textContent = "PHASE 1: HETEROGENEOUS SWARM DEPLOYMENT & CORRIDOR TRANSIT";
+        if (descEl) descEl.textContent = "8-UAV autonomous fleet executes coordinated takeoff and altitude corridor separation with zero human intervention.";
+        
+        const orbitAngle = elapsedSec * 0.12;
+        const camX = Math.sin(orbitAngle) * 260;
+        const camY = -Math.cos(orbitAngle) * 260;
+        cameraTheater.position.lerp(new THREE.Vector3(camX, camY, 180), 0.05);
+        controlsTheater.target.lerp(new THREE.Vector3(0, 0, 25), 0.05);
+    } else if (elapsedSec < 30) {
+        // Phase 2: Non-Line-Of-Sight Relay Deployment Over Collapsed Skyscraper
+        if (titleEl) titleEl.textContent = "PHASE 2: NON-LINE-OF-SIGHT AERIAL RELAY BRIDGING";
+        if (descEl) descEl.textContent = "RELAY_1 executes Virtual Spring Mesh (VSM) positioning above 45m collapsed skyscraper to maintain 100% GCS connectivity.";
+
+        const relayMesh = droneMeshes.get("RELAY_1");
+        if (relayMesh) {
+            cameraTheater.position.lerp(relayMesh.position.clone().add(new THREE.Vector3(25, -25, 15)), 0.05);
+            controlsTheater.target.lerp(relayMesh.position, 0.08);
+        }
+    } else if (elapsedSec < 45) {
+        // Phase 3: Autonomous SLAM & 3D Voxel Cognition
+        if (titleEl) titleEl.textContent = "PHASE 3: ONBOARD 3D LIDAR SLAM & VOXEL RECONSTRUCTION";
+        if (descEl) descEl.textContent = "Autonomous UAVs construct 3D OctoMap occupancy grids and execute real-time Khatib APF obstacle deconfliction.";
+
+        // Focus on SLAM surveyor
+        selectDrone("UAV_1");
+        const uavMesh = droneMeshes.get("UAV_1");
+        if (uavMesh) {
+            cameraTheater.position.lerp(uavMesh.position.clone().add(new THREE.Vector3(-15, -15, 8)), 0.05);
+            controlsTheater.target.lerp(uavMesh.position, 0.08);
+        }
+    } else if (elapsedSec < 60) {
+        // Phase 4: Mission Accomplished & Survivor Localization
+        if (titleEl) titleEl.textContent = "PHASE 4: DISASTER SITES LOCALIZED & CONTINUOUS TELEMETRY SECURED";
+        if (descEl) descEl.textContent = "Multi-hop FANET delivers critical sensor payloads to GCS with 0% packet loss and 8.5ms latency.";
+
+        cameraTheater.position.lerp(new THREE.Vector3(0, -220, 130), 0.04);
+        controlsTheater.target.lerp(new THREE.Vector3(0, 0, 20), 0.04);
+    } else {
+        // Loop back to Phase 1 for continuous demo
+        investorStartTime = performance.now();
+    }
+}
