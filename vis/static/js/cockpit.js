@@ -1160,27 +1160,62 @@ function updateHUD(telemetry) {
     const completedCount = pois.filter(p => p.is_completed).length;
     document.getElementById("metric-pois").textContent = `${completedCount} / ${pois.length}`;
 
-    // Fleet List
+    // Fleet List: In-place DOM update without recreating nodes every 33ms
     const fleetContainer = document.getElementById("fleet-list");
-    fleetContainer.innerHTML = "";
-    (telemetry.drones || []).forEach(d => {
-        const card = document.createElement("div");
-        card.className = `drone-card ${d.role.toLowerCase()} ${selectedDroneId === d.id ? 'selected' : ''}`;
-        card.addEventListener("click", () => selectDrone(d.id));
-        card.innerHTML = `
-            <div class="drone-header">
-                <span>${d.id} [${d.role}]</span>
-                <span class="text-cyan">${d.flight_mode}</span>
-            </div>
-            <div class="drone-stats">
-                <div>ALT: <span>${d.position[2].toFixed(1)}m</span></div>
-                <div>BAT: <span>${d.battery_pct.toFixed(0)}%</span></div>
-                <div>SPD: <span>${Math.hypot(d.velocity[0], d.velocity[1]).toFixed(1)} m/s</span></div>
-                <div>POI: <span>${d.assigned_poi_id || 'NONE'}</span></div>
-            </div>
-        `;
-        fleetContainer.appendChild(card);
-    });
+    if (fleetContainer) {
+        const drones = telemetry.drones || [];
+        const existingCards = fleetContainer.children;
+
+        // If card count doesn't match drone count, rebuild once
+        if (existingCards.length !== drones.length) {
+            fleetContainer.innerHTML = "";
+            drones.forEach(d => {
+                const card = document.createElement("div");
+                card.id = `drone-card-${d.id}`;
+                card.dataset.droneId = d.id;
+                card.className = `drone-card ${d.role.toLowerCase()}${selectedDroneId === d.id ? ' selected' : ''}`;
+                card.innerHTML = `
+                    <div class="drone-header">
+                        <span class="card-id-role">${d.id} [${d.role}]</span>
+                        <span class="text-cyan card-mode">${d.flight_mode}</span>
+                    </div>
+                    <div class="drone-stats">
+                        <div>ALT: <span class="card-alt">${d.position[2].toFixed(1)}m</span></div>
+                        <div>BAT: <span class="card-bat">${d.battery_pct.toFixed(0)}%</span></div>
+                        <div>SPD: <span class="card-spd">${Math.hypot(d.velocity[0], d.velocity[1]).toFixed(1)} m/s</span></div>
+                        <div>POI: <span class="card-poi">${d.assigned_poi_id || 'NONE'}</span></div>
+                    </div>
+                `;
+                fleetContainer.appendChild(card);
+            });
+        } else {
+            // Update in place - preserves DOM nodes and click/touch events perfectly
+            drones.forEach((d, idx) => {
+                const card = existingCards[idx];
+                if (!card) return;
+                card.dataset.droneId = d.id;
+                const isSelected = selectedDroneId === d.id;
+                const targetClass = `drone-card ${d.role.toLowerCase()}${isSelected ? ' selected' : ''}`;
+                if (card.className !== targetClass) card.className = targetClass;
+
+                const modeEl = card.querySelector(".card-mode");
+                if (modeEl && modeEl.textContent !== d.flight_mode) modeEl.textContent = d.flight_mode;
+
+                const altEl = card.querySelector(".card-alt");
+                if (altEl) altEl.textContent = `${d.position[2].toFixed(1)}m`;
+
+                const batEl = card.querySelector(".card-bat");
+                if (batEl) batEl.textContent = `${d.battery_pct.toFixed(0)}%`;
+
+                const spdEl = card.querySelector(".card-spd");
+                if (spdEl) spdEl.textContent = `${Math.hypot(d.velocity[0], d.velocity[1]).toFixed(1)} m/s`;
+
+                const poiEl = card.querySelector(".card-poi");
+                const poiText = d.assigned_poi_id || 'NONE';
+                if (poiEl && poiEl.textContent !== poiText) poiEl.textContent = poiText;
+            });
+        }
+    }
 
     // Routes List
     const routesContainer = document.getElementById("routes-list");
@@ -1736,6 +1771,36 @@ function initUIControls() {
                 } else {
                     pnl.classList.add("hidden");
                 }
+            }
+        });
+    }
+
+    // Toggle inspect panel via left fleet header button
+    const btnFleetAvionics = document.getElementById("btn-fleet-avionics");
+    if (btnFleetAvionics) {
+        btnFleetAvionics.addEventListener("click", (e) => {
+            e.stopPropagation();
+            isInspectOpen = !isInspectOpen;
+            const pnl = document.getElementById("drone-inspect-panel");
+            if (pnl) {
+                if (isInspectOpen) {
+                    pnl.classList.remove("hidden");
+                    const drone = (latestTelemetry && latestTelemetry.drones || []).find(d => d.id === selectedDroneId) || (latestTelemetry && latestTelemetry.drones && latestTelemetry.drones[0]);
+                    if (drone) updateInspectPanel(drone);
+                } else {
+                    pnl.classList.add("hidden");
+                }
+            }
+        });
+    }
+
+    // Fleet list click event delegation: clicks anywhere on a drone card open the box
+    const fleetListEl = document.getElementById("fleet-list");
+    if (fleetListEl) {
+        fleetListEl.addEventListener("pointerdown", (e) => {
+            const card = e.target.closest(".drone-card");
+            if (card && card.dataset.droneId) {
+                selectDrone(card.dataset.droneId);
             }
         });
     }

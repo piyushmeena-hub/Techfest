@@ -231,7 +231,10 @@
     <aside class="hud-left glass-panel">
         <div class="panel-header">
             <h3>ACTIVE UAV FLEET</h3>
-            <span class="badge text-neon-green" id="fleet-count">8 UNITS</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button id="btn-fleet-avionics" class="badge text-cyan" style="cursor:pointer; background:rgba(0,229,255,0.15); border:1px solid rgba(0,229,255,0.4); padding:3px 6px; font-weight:bold; letter-spacing:0.5px;" title="Click to view live Avionics Telemetry">AVIONICS ⤢</button>
+                <span class="badge text-neon-green" id="fleet-count">8 UNITS</span>
+            </div>
         </div>
         <div id="fleet-list" class="fleet-scroll-container">
             <!-- Dynamic drone items injected here -->
